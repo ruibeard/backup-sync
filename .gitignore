@@ -2,6 +2,9 @@
 /build/
 /out/
 /bin/
+bin/
+obj/
+.DS_Store
 
 # CMake-generated files
 /CMakeCache.txt
