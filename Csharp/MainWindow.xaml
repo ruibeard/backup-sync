@@ -352,7 +352,7 @@
         </Border>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Bottom bar: version label + Update + Save + Close           -->
+        <!-- Bottom bar: version label + Check + Install + Save + Close  -->
         <!-- ═══════════════════════════════════════════════════════════ -->
         <Grid Grid.Row="4" Margin="4,4,4,4">
             <Grid.ColumnDefinitions>
@@ -362,16 +362,18 @@
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="6"/>
                 <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Version label -->
+            <!-- Version label + update-available hint -->
             <StackPanel Grid.Column="0" Orientation="Vertical" VerticalAlignment="Center">
                 <TextBlock x:Name="VersionLabel"
-                            Text="WEBDAVSYNC V1.0"
-                            FontFamily="Segoe UI"
-                            FontSize="10"
-                            FontWeight="SemiBold"
-                            Foreground="#AAAAAA"/>
+                           Text="WEBDAVSYNC"
+                           FontFamily="Segoe UI"
+                           FontSize="10"
+                           FontWeight="SemiBold"
+                           Foreground="#AAAAAA"/>
                 <TextBlock x:Name="UpdateAvailableLabel"
                            Text=""
                            FontFamily="Segoe UI"
@@ -380,20 +382,33 @@
                            Visibility="Collapsed"/>
             </StackPanel>
 
-            <!-- Update button -->
+            <!-- CHECK button — always visible, runs the check -->
             <Button Grid.Column="1"
-                    x:Name="UpdateBtn"
+                    x:Name="CheckUpdatesBtn"
                     Style="{StaticResource UpdateButton}"
-                    Click="Update_Click"
-                    IsEnabled="False">
+                    Click="CheckUpdates_Click">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="&#x2B06;" FontSize="11" Margin="0,0,5,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="UPDATE" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <TextBlock Text="&#x21BA;" FontSize="12" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="CheckUpdatesBtnText"
+                               Text="CHECK"
+                               FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 </StackPanel>
             </Button>
 
-            <!-- Save button (blue, with save icon) -->
+            <!-- INSTALL UPDATE button — hidden until an update is found -->
             <Button Grid.Column="3"
+                    x:Name="InstallUpdateBtn"
+                    Style="{StaticResource UpdateButton}"
+                    Click="InstallUpdate_Click"
+                    Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#x2B06;" FontSize="11" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="INSTALL UPDATE" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
+            <!-- Save button -->
+            <Button Grid.Column="5"
                     Style="{StaticResource SaveButton}"
                     Click="Save_Click">
                 <StackPanel Orientation="Horizontal">
@@ -403,7 +418,7 @@
             </Button>
 
             <!-- Close button -->
-            <Button Grid.Column="5"
+            <Button Grid.Column="7"
                     Style="{StaticResource CloseButton}"
                     Click="Close_Click">
                 <StackPanel Orientation="Horizontal">

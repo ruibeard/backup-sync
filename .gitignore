@@ -1,10 +1,14 @@
 # Build directories
 /build/
 /out/
+cpp/build/
 /bin/
 bin/
 obj/
 .DS_Store
+
+# Rust build output
+rust/target/
 
 # CMake-generated files
 /CMakeCache.txt

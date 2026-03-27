@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -16,6 +17,13 @@ public partial class MainWindow : Window
         InitializeComponent();
         _config = ConfigStore.Load();
         LoadIntoControls();
+
+        // Set version label from assembly — always in sync with the build
+        var ver = Assembly.GetExecutingAssembly().GetName().Version;
+        VersionLabel.Text = ver != null
+            ? $"WEBDAVSYNC V{ver.Major}.{ver.Minor}.{ver.Build}"
+            : "WEBDAVSYNC";
+
         CheckForUpdateAsync();
     }
 
@@ -250,43 +258,94 @@ public partial class MainWindow : Window
 
     // ── Update ────────────────────────────────────────────────────────────
 
+    // Called on startup (silent — no UI noise if up to date).
     private async void CheckForUpdateAsync()
     {
         try
         {
-            var (hasUpdate, downloadUrl, newVersion) = await UpdateService.CheckAsync();
+            var (hasUpdate, downloadUrl, newVersion, sha256) = await UpdateService.CheckAsync();
             if (hasUpdate)
-            {
-                UpdateAvailableLabel.Text       = $"v{newVersion} available";
-                UpdateAvailableLabel.Visibility = Visibility.Visible;
-                UpdateBtn.IsEnabled             = true;
-                UpdateBtn.Tag                   = downloadUrl;
-                AppendActivity($"Update available: v{newVersion}");
-            }
+                ShowUpdateAvailable(downloadUrl, newVersion, sha256);
         }
-        catch { /* silently ignore */ }
+        catch { /* silently ignore on startup */ }
     }
 
-    private async void Update_Click(object sender, RoutedEventArgs e)
+    // Called by the CHECK button and by the tray "Check for Updates" item.
+    public async Task RunUpdateCheckAsync(bool manual = false)
     {
-        var url = UpdateBtn.Tag as string;
+        CheckUpdatesBtn.IsEnabled    = false;
+        CheckUpdatesBtnText.Text     = "CHECKING…";
+
+        try
+        {
+            var (hasUpdate, downloadUrl, newVersion, sha256) = await UpdateService.CheckAsync();
+
+            if (hasUpdate)
+            {
+                ShowUpdateAvailable(downloadUrl, newVersion, sha256);
+            }
+            else
+            {
+                // Always show "up to date" feedback — in the label and activity log
+                UpdateAvailableLabel.Text       = "up to date";
+                UpdateAvailableLabel.Foreground = System.Windows.Media.Brushes.Gray;
+                UpdateAvailableLabel.Visibility = Visibility.Visible;
+                if (manual)
+                    AppendActivity("Already up to date.");
+            }
+        }
+        catch (Exception ex)
+        {
+            UpdateAvailableLabel.Text       = "check failed";
+            UpdateAvailableLabel.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            UpdateAvailableLabel.Visibility = Visibility.Visible;
+            if (manual)
+                AppendActivity($"Update check failed: {ex.Message}");
+        }
+        finally
+        {
+            CheckUpdatesBtn.IsEnabled = true;
+            CheckUpdatesBtnText.Text  = "CHECK";
+        }
+    }
+
+    private void ShowUpdateAvailable(string downloadUrl, string newVersion, string sha256)
+    {
+        // Guard: don't duplicate if already shown
+        if (InstallUpdateBtn.Visibility == Visibility.Visible) return;
+
+        UpdateAvailableLabel.Text       = $"v{newVersion} available";
+        UpdateAvailableLabel.Foreground = new SolidColorBrush(WpfColor.FromRgb(0x2B, 0x4F, 0xA3));
+        UpdateAvailableLabel.Visibility = Visibility.Visible;
+        InstallUpdateBtn.Tag            = (downloadUrl, sha256);
+        InstallUpdateBtn.Visibility     = Visibility.Visible;
+        AppendActivity($"Update available: v{newVersion}");
+    }
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e)
+        => await RunUpdateCheckAsync(manual: true);
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (InstallUpdateBtn.Tag is not (string url, string sha256)) return;
         if (string.IsNullOrWhiteSpace(url)) return;
 
         var result = WpfMessageBox.Show(
-            "A new version is available. Download and install now?\n\nThe app will restart after the update.",
+            "Download and install the update now?\n\nThe app will restart after the update.",
             "WebDavSync Update", MessageBoxButton.YesNo, MessageBoxImage.Question);
 
         if (result != MessageBoxResult.Yes) return;
 
-        UpdateBtn.IsEnabled = false;
+        InstallUpdateBtn.IsEnabled = false;
+        CheckUpdatesBtn.IsEnabled  = false;
         AppendActivity("Downloading update…");
 
         try
         {
-            await UpdateService.DownloadAndReplaceAsync(url,
+            await UpdateService.DownloadAndReplaceAsync(url, sha256,
                 progress => Dispatcher.Invoke(() => AppendActivity($"Download: {progress}%")));
 
-            WpfMessageBox.Show("Update downloaded. The application will now restart.",
+            WpfMessageBox.Show("Update downloaded. The app will now restart.",
                 "WebDavSync", MessageBoxButton.OK, MessageBoxImage.Information);
 
             UpdateService.RestartWithUpdatedBinary();
@@ -295,8 +354,27 @@ public partial class MainWindow : Window
         {
             WpfMessageBox.Show($"Update failed: {ex.Message}", "WebDavSync",
                 MessageBoxButton.OK, MessageBoxImage.Error);
-            UpdateBtn.IsEnabled = true;
+            InstallUpdateBtn.IsEnabled = true;
+            CheckUpdatesBtn.IsEnabled  = true;
         }
+    }
+
+    /// <summary>Called by App.xaml.cs tray "Check for Updates" after opening the window.</summary>
+    public void NotifyUpdateAvailable(string downloadUrl, string newVersion, string sha256 = "")
+    {
+        Dispatcher.Invoke(() => ShowUpdateAvailable(downloadUrl, newVersion, sha256));
+    }
+
+    /// <summary>Triggers an immediate sync pass. Called from the tray "Sync Now" item.</summary>
+    public void TriggerSyncNow()
+    {
+        if (_syncEngine == null)
+        {
+            AppendActivity("Sync Now: engine not running — save configuration first.");
+            return;
+        }
+        RestartSyncEngine();
+        AppendActivity("Sync Now triggered from tray.");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────

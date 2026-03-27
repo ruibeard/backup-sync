@@ -127,8 +127,8 @@ events:
     checks:
       - "Detecting C compiler ABI info"
     directories:
-      source: "C:/Users/rui.almeida/Code/backup-sync-tool/legacy-win32/build/CMakeFiles/CMakeScratch/TryCompile-p0mwu4"
-      binary: "C:/Users/rui.almeida/Code/backup-sync-tool/legacy-win32/build/CMakeFiles/CMakeScratch/TryCompile-p0mwu4"
+      source: "C:/Users/rui.almeida/Code/backup-sync-tool/cpp/build/CMakeFiles/CMakeScratch/TryCompile-p0mwu4"
+      binary: "C:/Users/rui.almeida/Code/backup-sync-tool/cpp/build/CMakeFiles/CMakeScratch/TryCompile-p0mwu4"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
       CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
@@ -210,8 +210,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/rui.almeida/Code/backup-sync-tool/legacy-win32/build/CMakeFiles/CMakeScratch/TryCompile-ty9d10"
-      binary: "C:/Users/rui.almeida/Code/backup-sync-tool/legacy-win32/build/CMakeFiles/CMakeScratch/TryCompile-ty9d10"
+      source: "C:/Users/rui.almeida/Code/backup-sync-tool/cpp/build/CMakeFiles/CMakeScratch/TryCompile-ty9d10"
+      binary: "C:/Users/rui.almeida/Code/backup-sync-tool/cpp/build/CMakeFiles/CMakeScratch/TryCompile-ty9d10"
     cmakeVariables:
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
       CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
