@@ -2,11 +2,13 @@
 
 ## Build & Launch Rules (MANDATORY)
 
-- **After every code change: rebuild and relaunch the app before stopping.**
-- Kill the running process first: `Stop-Process -Name "backupsynctool" -Force -ErrorAction SilentlyContinue`
-- Build: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo build`  (from `rust/`)
-- Launch: `Start-Process "target\debug\backupsynctool.exe"`
+- **After every code change: rebuild, copy exe to root, relaunch from root.**
+- Kill: `Stop-Process -Name "backupsynctool" -Force -ErrorAction SilentlyContinue`
+- Build: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo build --release` (from `rust/`)
+- Copy: `Copy-Item "rust\target\release\backupsynctool.exe" "backupsynctool.exe" -Force` (from repo root)
+- Launch: `Start-Process "backupsynctool.exe"` (from repo root — so it finds `backupsynctool.json` next to it)
 - Always confirm: build succeeded (0 errors) + app is running.
+- **NEVER launch from `rust/target/debug/` or `rust/target/release/` — ALWAYS from repo root.**
 
 ---
 
