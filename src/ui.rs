@@ -69,6 +69,7 @@ const IDC_START_WINDOWS: u16 = 115;
 const IDC_SYNC_REMOTE: u16 = 116;
 // IDC_SHOW_PASSWORD (117) removed — eye icon is now drawn inside the edit subclass
 const IDC_REPO: u16 = 120;
+const IDC_DEST_CREATED: u16 = 121;
 const IDC_PICKER_PATH: u16 = 201;
 const IDC_PICKER_LIST: u16 = 202;
 const IDC_PICKER_UP: u16 = 203;
@@ -80,6 +81,7 @@ const WM_APP_CONNECTED: u32 = WM_APP + 11;
 const WM_APP_UPDATE: u32 = WM_APP + 12;
 const WM_APP_REMOTE_FOLDER: u32 = WM_APP + 13;
 const WM_APP_PICKER_LOADED: u32 = WM_APP + 14;
+const WM_APP_DEST_READY: u32 = WM_APP + 15;
 
 const SS_LEFT: u32 = 0x0000;
 
@@ -110,6 +112,8 @@ struct WndState {
     sync_engine: Option<crate::sync::SyncEngine>,
     update_url: Option<String>,
     connected: bool,
+    remote_folder_from_xd: bool,
+    remote_folder_created: bool,
     /// True when URL/username/password have been edited since the last save/connect
     creds_dirty: bool,
     #[allow(dead_code)]
@@ -254,6 +258,7 @@ unsafe extern "system" fn wnd_proc(
             }
             let text_clr = match id {
                 IDC_VERSION => C_HDR,
+                IDC_DEST_CREATED => C_GREEN,
                 _ => C_LABEL,
             };
             SetTextColor(hdc, COLORREF(text_clr));
@@ -289,6 +294,7 @@ unsafe extern "system" fn wnd_proc(
         WM_APP_CONNECTED => on_app_connected(hwnd, wparam),
         WM_APP_UPDATE => on_app_update(hwnd, wparam, lparam),
         WM_APP_REMOTE_FOLDER => on_app_remote_folder(hwnd, lparam),
+        WM_APP_DEST_READY => on_app_dest_ready(hwnd, wparam),
 
         WM_CLOSE => {
             ShowWindow(hwnd, SW_HIDE);
@@ -535,6 +541,7 @@ unsafe fn on_create(hwnd: HWND) {
     let hfont_small = mkfont("Segoe UI", 9, FW_NORMAL.0 as i32);
 
     let mut cfg = crate::config::load();
+    let mut remote_folder_from_xd = false;
     if cfg.watch_folder.is_empty() {
         if let Some(path) = crate::xd::default_watch_folder() {
             cfg.watch_folder = path;
@@ -543,6 +550,7 @@ unsafe fn on_create(hwnd: HWND) {
     if cfg.remote_folder.is_empty() {
         if let Some(remote_folder) = crate::xd::detect_default_remote_folder() {
             cfg.remote_folder = remote_folder;
+            remote_folder_from_xd = true;
         }
     }
     let pass = secret::decrypt(&cfg.password_enc).unwrap_or_default();
@@ -553,6 +561,8 @@ unsafe fn on_create(hwnd: HWND) {
         sync_engine: None,
         update_url: None,
         connected: false,
+        remote_folder_from_xd,
+        remote_folder_created: false,
         creds_dirty: false,
         hfont,
         hfont_hdr,
@@ -785,7 +795,19 @@ unsafe fn build_ui(
         );
         y += INP_H + GAP;
 
-        mkfield_label(hwnd, hi, "Destination folder", M, y, INNER_W, hf_small);
+        mkfield_label(hwnd, hi, "Destination folder", M, y, 112, hf_small);
+        mkstatic(
+            hwnd,
+            hi,
+            IDC_DEST_CREATED,
+            "Created on server",
+            M + 118,
+            y,
+            120,
+            LBL_H,
+            hf_small,
+        );
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
         y += LBL_H + 4;
         mkedit_cue(
             hwnd,
@@ -1261,6 +1283,14 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
         return LRESULT(0);
     }
 
+    if notif == 0x0300u16 && id == IDC_REMOTE_FOLDER {
+        let st = stmut(hwnd);
+        st.remote_folder_from_xd = false;
+        st.remote_folder_created = false;
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
+        return LRESULT(0);
+    }
+
     match id {
         x if x == tray::ID_TRAY_OPEN as u16 => {
             ShowWindow(hwnd, SW_SHOW);
@@ -1440,6 +1470,7 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
         set_status(hwnd, "\u{25cf}  Connected");
         st.creds_dirty = false;
         ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
+        maybe_create_xd_remote_folder(hwnd);
     } else {
         set_status(hwnd, "\u{25cf}  Not connected");
         EnableWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), TRUE);
@@ -1465,11 +1496,28 @@ unsafe fn on_app_update(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
 unsafe fn on_app_remote_folder(hwnd: HWND, lp: LPARAM) -> LRESULT {
     let remote_folder = Box::from_raw(lp.0 as *mut String);
     if gettext(hwnd, IDC_REMOTE_FOLDER).is_empty() {
-        stmut(hwnd).config.remote_folder = (*remote_folder).clone();
+        let st = stmut(hwnd);
+        st.config.remote_folder = (*remote_folder).clone();
+        st.remote_folder_from_xd = true;
+        st.remote_folder_created = false;
         let _ = SetWindowTextW(
             GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
             &hstring(&remote_folder),
         );
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
+    }
+    LRESULT(0)
+}
+
+unsafe fn on_app_dest_ready(hwnd: HWND, wp: WPARAM) -> LRESULT {
+    let created = wp.0 == 1;
+    let st = stmut(hwnd);
+    st.remote_folder_created = created;
+    if created {
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_SHOW);
+        InvalidateRect(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), None, TRUE);
+    } else {
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
     }
     LRESULT(0)
 }
@@ -1492,11 +1540,68 @@ unsafe fn browse_remote(hwnd: HWND) {
 
     if let Some(folder) = remote_folder_picker(hwnd, st.config.clone(), st.password_plain.clone()) {
         st.config.remote_folder = folder.clone();
+        st.remote_folder_from_xd = false;
+        st.remote_folder_created = false;
+        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
         let _ = SetWindowTextW(
             GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
             &hstring(&folder),
         );
     }
+}
+
+unsafe fn maybe_create_xd_remote_folder(hwnd: HWND) {
+    let st = stmut(hwnd);
+    if !st.remote_folder_from_xd || st.remote_folder_created {
+        return;
+    }
+    if st.config.remote_folder.trim().is_empty()
+        || st.config.webdav_url.trim().is_empty()
+        || st.config.username.trim().is_empty()
+        || st.password_plain.trim().is_empty()
+    {
+        return;
+    }
+
+    let cfg = st.config.clone();
+    let pass = st.password_plain.clone();
+    let raw = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let created = ensure_remote_folder_exists(&cfg, &pass, &cfg.remote_folder).is_ok();
+        unsafe {
+            PostMessageW(
+                HWND(raw),
+                WM_APP_DEST_READY,
+                WPARAM(if created { 1 } else { 0 }),
+                LPARAM(0),
+            )
+            .ok();
+        }
+    });
+}
+
+fn ensure_remote_folder_exists(
+    cfg: &Config,
+    password: &str,
+    folder: &str,
+) -> std::result::Result<(), String> {
+    let folder = normalize_remote_folder(folder);
+    if folder.is_empty() {
+        return Ok(());
+    }
+
+    let mut current = String::new();
+    for part in folder.split('/') {
+        if current.is_empty() {
+            current.push_str(part);
+        } else {
+            current.push('/');
+            current.push_str(part);
+        }
+        let url = join_remote_url(&cfg.webdav_url, &current);
+        webdav::mkcol(cfg, password, &url)?;
+    }
+    Ok(())
 }
 
 unsafe fn on_tray(hwnd: HWND, lp: LPARAM) -> LRESULT {
