@@ -1,6 +1,6 @@
 [package]
 name = "backupsynctool"
-version = "2026.1.12"
+version = "2026.1.13"
 edition = "2021"
 
 [[bin]]

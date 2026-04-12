@@ -20,7 +20,7 @@ if (-not $GitRelease) {
 }
 
 $v = "v" + ([regex]::Match((Get-Content "Cargo.toml" -Raw), 'version\s*=\s*"([^"]+)"')).Groups[1].Value
-git add backupsynctool.exe license-inspector.exe Cargo.toml Cargo.lock
+git add backupsynctool.exe Cargo.toml Cargo.lock
 
 $hasStagedChanges = (git diff --cached --quiet); if ($LASTEXITCODE -eq 0) { $hasStagedChanges = $false } else { $hasStagedChanges = $true }
 if ($hasStagedChanges) {

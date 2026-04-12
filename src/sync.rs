@@ -4,14 +4,13 @@
 use crate::config::Config;
 use crate::webdav;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
-const MAX_PARALLEL_UPLOADS: usize = 2;
 
 pub struct SyncEngine {
     _watcher: RecommendedWatcher,
@@ -64,6 +63,10 @@ impl SyncEngine {
                 completed: 0,
                 total: 0,
             });
+            log_clone(format!(
+                "Checking remote files (parallel uploads: {})",
+                cfg_watcher.parallel_uploads.max(1)
+            ));
             let remote_existing = fetch_remote_existing(&cfg_watcher, &pass_watcher, &log_clone);
 
             let _initial_uploads = sync_initial_local_to_remote(
@@ -75,6 +78,7 @@ impl SyncEngine {
             );
 
             if cfg_watcher.sync_remote_changes {
+                log_clone("Checking remote changes".to_string());
                 sync_remote_to_local(&cfg_watcher, &pass_watcher, &suppressed_clone, &log_clone);
             }
 
@@ -118,7 +122,7 @@ impl SyncEngine {
                     &pass_watcher,
                     &due,
                     &log_clone,
-                    MAX_PARALLEL_UPLOADS,
+                    cfg_watcher.parallel_uploads,
                     Some(&activity_clone),
                 );
 
@@ -219,8 +223,16 @@ fn upload_path(cfg: &Config, password: &str, path: &PathBuf, log: &LogFn) {
         return;
     }
 
-    let data = match std::fs::read(path) {
-        Ok(d) => d,
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            log(format!("Read error {}: {}", path.display(), e));
+            return;
+        }
+    };
+
+    let size = match file.metadata() {
+        Ok(meta) => meta.len(),
         Err(e) => {
             log(format!("Read error {}: {}", path.display(), e));
             return;
@@ -245,7 +257,7 @@ fn upload_path(cfg: &Config, password: &str, path: &PathBuf, log: &LogFn) {
         }
     }
 
-    match webdav::put_file(cfg, password, &remote_url, &data) {
+    match webdav::put_file(cfg, password, &remote_url, file, size) {
         Ok(_) => log(format!("Uploaded: {}", relative)),
         Err(e) => log(format!("Upload failed {}: {}", relative, e)),
     }
@@ -259,27 +271,30 @@ fn upload_paths_parallel(
     max_parallel: usize,
     activity: Option<&ActivityFn>,
 ) -> usize {
-    let width = max_parallel.max(1);
+    let width = max_parallel.max(1).min(paths.len().max(1));
     let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let total = paths.len();
-    for chunk in paths.chunks(width) {
-        std::thread::scope(|scope| {
-            for path in chunk {
-                let completed = completed.clone();
-                scope.spawn(move || {
-                    upload_path(cfg, password, path, log);
-                    let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                    if let Some(activity) = activity {
-                        activity(ActivityInfo {
-                            state: ActivityState::Syncing,
-                            completed: done,
-                            total,
-                        });
-                    }
-                });
-            }
-        });
-    }
+    let queue = Arc::new(Mutex::new(VecDeque::from(paths.to_vec())));
+    std::thread::scope(|scope| {
+        for _ in 0..width {
+            let queue = queue.clone();
+            let completed = completed.clone();
+            scope.spawn(move || loop {
+                let Some(path) = queue.lock().unwrap().pop_front() else {
+                    break;
+                };
+                upload_path(cfg, password, &path, log);
+                let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                if let Some(activity) = activity {
+                    activity(ActivityInfo {
+                        state: ActivityState::Syncing,
+                        completed: done,
+                        total,
+                    });
+                }
+            });
+        }
+    });
     completed.load(std::sync::atomic::Ordering::SeqCst)
 }
 
@@ -305,7 +320,9 @@ fn sync_initial_local_to_remote(
     log: &LogFn,
     activity: &ActivityFn,
 ) -> usize {
+    log("Counting local files".to_string());
     let local_files = collect_local_files(&cfg.watch_folder);
+    log("Comparing local to remote".to_string());
     let mut pending_uploads = Vec::new();
 
     for path in local_files {
@@ -336,7 +353,7 @@ fn sync_initial_local_to_remote(
         password,
         &pending_uploads,
         log,
-        MAX_PARALLEL_UPLOADS,
+        cfg.parallel_uploads,
         Some(activity),
     );
     uploaded

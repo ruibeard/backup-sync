@@ -37,6 +37,8 @@
 - [x] Uploads new files
 - [x] Uploads changed files
 - [x] Uploads can run in parallel with a bounded concurrency limit
+- [x] Parallel upload limit is configurable via `backupsynctool.json`
+- [x] Uploads stream file contents instead of reading entire files into memory first
 - [x] Automatically uploads newly created files in the local folder without any user action
 - [x] Uses a file watcher / continuous watch mechanism so local changes are detected automatically
 - [x] Creates remote folders as needed
@@ -62,6 +64,7 @@
 - [x] If XD software is not installed or detection fails, the app leaves the remote folder empty instead of prefilling it
 - [x] If XD-based detection succeeds, the remote folder is prefilled automatically
 - [x] Remote folder detection derives the value from XD license data
+- [x] XD detection runs directly from the Rust app via PowerShell/DLL inspection (no external helper EXE required)
 
 ### Update Flow
 
@@ -104,3 +107,4 @@
 
 - [x] Tray menu item: `Open Logs`
 - [x] Recent Activity shows only compact transfer entries (`↑ filename` / `↓ filename`) with no timestamps
+- [x] Recent Activity shows explicit checking stages such as remote scan and local counting/comparison

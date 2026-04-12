@@ -104,13 +104,20 @@ pub fn get_file(cfg: &Config, password: &str, remote_url: &str) -> Result<Vec<u8
     Ok(data)
 }
 
-pub fn put_file(cfg: &Config, password: &str, remote_url: &str, data: &[u8]) -> Result<(), String> {
+pub fn put_file<R: Read>(
+    cfg: &Config,
+    password: &str,
+    remote_url: &str,
+    reader: R,
+    content_length: u64,
+) -> Result<(), String> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     agent()
         .request("PUT", remote_url)
         .set("Authorization", &auth)
-        .send_bytes(data)
+        .set("Content-Length", &content_length.to_string())
+        .send(reader)
         .map_err(|e| e.to_string())
         .and_then(|r| {
             if r.status() < 400 {

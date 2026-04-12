@@ -5,5 +5,6 @@
   "password_enc": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAKAtvQrn/30qyyTANxKS/4gAAAAAWAAAAdwBlAGIAZABhAHYAcwB5AG4AYwAAABBmAAAAAQAAIAAAAFOqiNz2goQx/FEtN4Qxywpy/zvdPJg//AeOal7ny/+WAAAAAA6AAAAAAgAAIAAAAMcFp3J88rFCp/8bxdxPepcKortY9PnYx6dYAdZYeHjWIAAAAEsOv/7cWax0ZKCjy/pLlYg8yETpOld4j2jLPBAJ7wTZQAAAAPAixMtVUr0fAw5shSBIncbksD4UBrfd9FzqwNWhqyzOuQm8ahf8G20zJGfzco4HWgsYQWz+LcEQtc07YFatR/0=",
   "remote_folder": "XDPT.59655_Palmeira-Minimercado",
   "start_with_windows": true,
-  "sync_remote_changes": true
+  "sync_remote_changes": true,
+  "parallel_uploads": 10
 }

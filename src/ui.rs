@@ -2066,6 +2066,18 @@ unsafe fn msgbox_yn(hwnd: HWND, text: &str, title: &str) -> bool {
 }
 
 fn activity_entry(message: &str) -> Option<String> {
+    if message == "Checking remote files" {
+        return Some("Checking remote files".to_string());
+    }
+    if message == "Counting local files" {
+        return Some("Counting local files".to_string());
+    }
+    if message == "Comparing local to remote" {
+        return Some("Comparing local to remote".to_string());
+    }
+    if message == "Checking remote changes" {
+        return Some("Checking remote changes".to_string());
+    }
     if let Some(name) = message.strip_prefix("Uploaded: ") {
         return Some(format!("↑ {}", display_activity_name(name)));
     }

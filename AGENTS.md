@@ -21,7 +21,7 @@
 - Password encrypted with Windows DPAPI (`secret.rs`)
 - Tray icon app — closing window hides to tray, double-click reopens
 - Auto-update: checks GitHub releases API directly, downloads, replaces in place, restarts
-- **Do not modify** `legacy-cpp-code/` or `legacy-win32/` (legacy reference — read only)
+- Legacy C++ code has been moved to `../legacy-backup-sync-tool/` (separate repo — read only)
 - `target/` is in `.gitignore`
 
 ---
@@ -50,7 +50,7 @@ The app checks GitHub releases API on startup. If a newer version is found, the 
 | `src/tray.rs` | System tray icon + context menu |
 | `src/updater.rs` | Checks GitHub releases API, downloads, bat-swap-restart |
 | `build.rs` | Embeds icons + manifest into the exe |
-| `assets/` | `app.ico`, `app-idle.ico`, `app-syncing.ico` |
+| `assets/` | icon and SVG assets used by the Rust app |
 
 ---
 

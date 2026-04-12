@@ -17,6 +17,8 @@ pub struct Config {
     pub start_with_windows: bool,
     #[serde(default)]
     pub sync_remote_changes: bool,
+    #[serde(default = "default_parallel_uploads")]
+    pub parallel_uploads: usize,
 }
 
 impl Default for Config {
@@ -29,6 +31,7 @@ impl Default for Config {
             remote_folder: String::new(),
             start_with_windows: true, // on by default
             sync_remote_changes: false,
+            parallel_uploads: default_parallel_uploads(),
         }
     }
 }
@@ -42,6 +45,10 @@ fn config_path() -> PathBuf {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_parallel_uploads() -> usize {
+    10
 }
 
 pub fn load() -> Config {
