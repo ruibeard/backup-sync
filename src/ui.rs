@@ -35,7 +35,6 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 // ── Colours  0x00BBGGRR ──────────────────────────────────────────────────────
 const C_WIN_BG: u32 = 0x00F0F0F0;
 const C_LABEL: u32 = 0x00333333;
-const C_HDR: u32 = 0x00888888;
 const C_INPUT_BG: u32 = 0x00FFFFFF;
 const C_INPUT_BORDER: u32 = 0x00CCCCCC;
 const C_INPUT_FOCUS: u32 = 0x00A34F2B;
@@ -61,10 +60,9 @@ const IDC_REMOTE_FOLDER: u16 = 106;
 const IDC_BROWSE_REMOTE: u16 = 107;
 const IDC_CONNECT: u16 = 108;
 const IDC_STATUS_TEXT: u16 = 109;
+const IDC_SERVER_STATUS: u16 = 123;
 const IDC_SAVE: u16 = 110;
 const IDC_SYNC_STATUS: u16 = 117;
-const IDC_UPDATE: u16 = 112;
-const IDC_VERSION: u16 = 113;
 const IDC_ACTIVITY_LIST: u16 = 114;
 const IDC_START_WINDOWS: u16 = 115;
 const IDC_SYNC_REMOTE: u16 = 116;
@@ -72,6 +70,7 @@ const IDC_SYNC_REMOTE: u16 = 116;
 const IDC_SYNC_PROGRESS: u16 = 118;
 const IDC_REPO: u16 = 120;
 const IDC_DEST_CREATED: u16 = 121;
+const IDC_UPDATE_LINK: u16 = 122;
 const IDC_PICKER_PATH: u16 = 201;
 const IDC_PICKER_LIST: u16 = 202;
 const IDC_PICKER_UP: u16 = 203;
@@ -89,7 +88,10 @@ const IDT_SYNC_ANIM: usize = 1;
 const SYNC_ANIM_MS: u32 = 120;
 
 const SS_LEFT: u32 = 0x0000;
+const SS_CENTER: u32 = 0x0001;
+#[allow(dead_code)]
 const SS_RIGHT: u32 = 0x0002;
+const SS_NOTIFY: u32 = 0x0100;
 
 pub const CLASS_NAME: PCWSTR = w!("BackupSyncToolWnd");
 const REPO_URL: &str = "https://github.com/ruibeard/backup-sync-tool";
@@ -105,10 +107,9 @@ const GAP: i32 = 12; // medium gap (between rows)
 const SECT: i32 = 20; // section separator gap
 const INP_H: i32 = 26; // input height
 const BTN_H: i32 = 30; // bottom-bar primary button height
-const CONN_H: i32 = 26; // Connect button height (matches INP_H)
 const HDR_H: i32 = 20; // section heading height
 const LBL_H: i32 = 18; // label text height
-const BROWSE_W: i32 = 68; // Browse button width
+const BROWSE_W: i32 = 34; // folder icon button width
 const INNER_W: i32 = WIN_W - M * 2; // usable inner width
                                     // Eye icon toggle zone inside the password edit right padding
 const EYE_ZONE_W: i32 = 26; // pixels from right edge of edit that count as eye click
@@ -124,6 +125,7 @@ struct WndState {
     sync_status_state: usize,
     sync_progress_done: usize,
     sync_progress_total: usize,
+    sync_started_at: Option<std::time::Instant>,
     sync_anim_frame: usize,
     sync_icon: HICON,
     sync_icon_rect: RECT,
@@ -139,6 +141,8 @@ struct WndState {
     hfont_b: HFONT,
     #[allow(dead_code)]
     hfont_small: HFONT,
+    #[allow(dead_code)]
+    hfont_link: HFONT,
     br_win: HBRUSH,
     br_sect: HBRUSH,
     br_input: HBRUSH,
@@ -147,8 +151,22 @@ struct WndState {
     pw_visible: bool,
     /// Divider y-positions for WM_PAINT
     dividers: Vec<i32>,
-    /// Inline status position (for WM_PAINT dot)
-    status_rect: RECT,
+    /// Layout: y-position where the activity listbox starts
+    activity_list_top: i32,
+    /// Layout: default activity listbox height
+    activity_list_h: i32,
+    /// Layout: gap from bottom of listbox to sync status row
+    post_list_gap: i32,
+    /// Layout: height of sync status row
+    sync_row_h: i32,
+    /// Layout: the SECT gap after sync row
+    post_sync_sect: i32,
+    /// Layout: height of bottom bar area (row_h + M)
+    bottom_bar_h: i32,
+    /// Layout: the y of the divider between activity section and bottom bar (index in dividers)
+    divider_activity_idx: usize,
+    /// Layout: minimum window client height
+    min_client_h: i32,
 }
 
 struct PickerResult {
@@ -211,7 +229,7 @@ pub fn run(hinstance: HINSTANCE) {
             WINDOW_EX_STYLE::default(),
             CLASS_NAME,
             w!("Backup Sync Tool"),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             WIN_W,
@@ -272,6 +290,10 @@ unsafe extern "system" fn wnd_proc(
                 SetTextColor(hdc, COLORREF(clr));
                 return LRESULT((*st).br_win.0 as isize);
             }
+            if id == IDC_SERVER_STATUS {
+                SetTextColor(hdc, COLORREF(C_LABEL));
+                return LRESULT((*st).br_win.0 as isize);
+            }
             if id == IDC_SYNC_STATUS {
                 let clr = if (*st).sync_status_state == crate::sync::ActivityState::Idle as usize {
                     C_GREEN
@@ -282,8 +304,8 @@ unsafe extern "system" fn wnd_proc(
                 return LRESULT((*st).br_win.0 as isize);
             }
             let text_clr = match id {
-                IDC_VERSION => C_HDR,
                 IDC_DEST_CREATED => C_GREEN,
+                IDC_REPO => C_BLUE,
                 _ => C_LABEL,
             };
             SetTextColor(hdc, COLORREF(text_clr));
@@ -313,6 +335,182 @@ unsafe extern "system" fn wnd_proc(
 
         WM_COMMAND => on_command(hwnd, wparam),
         WM_DRAWITEM => on_draw_item(lparam),
+
+        WM_GETMINMAXINFO => {
+            let mmi = &mut *(lparam.0 as *mut MINMAXINFO);
+            let st = state_ptr(hwnd);
+            if !st.is_null() && (*st).min_client_h > 0 {
+                // Calculate frame sizes
+                let mut wr_test = RECT {
+                    left: 0,
+                    top: 0,
+                    right: WIN_W,
+                    bottom: (*st).min_client_h,
+                };
+                let _ = AdjustWindowRectEx(
+                    &mut wr_test,
+                    WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_THICKFRAME,
+                    false,
+                    WINDOW_EX_STYLE::default(),
+                );
+                let frame_w = wr_test.right - wr_test.left;
+                let frame_h = wr_test.bottom - wr_test.top;
+                // Lock width, set min height
+                mmi.ptMinTrackSize = POINT {
+                    x: frame_w,
+                    y: frame_h,
+                };
+                mmi.ptMaxTrackSize.x = frame_w; // lock horizontal
+            }
+            LRESULT(0)
+        }
+
+        WM_SIZE => {
+            let st = state_ptr(hwnd);
+            if !st.is_null() && (*st).min_client_h > 0 {
+                let mut cr = RECT::default();
+                GetClientRect(hwnd, &mut cr).ok();
+                let client_h = cr.bottom - cr.top;
+                let extra_h = client_h - (*st).min_client_h;
+                let extra = if extra_h > 0 { extra_h } else { 0 };
+
+                // Stretch the activity listbox
+                let new_lb_h = (*st).activity_list_h + extra;
+                let hlb = GetDlgItem(hwnd, IDC_ACTIVITY_LIST as i32);
+                SetWindowPos(
+                    hlb,
+                    None,
+                    M,
+                    (*st).activity_list_top,
+                    INNER_W,
+                    new_lb_h,
+                    SWP_NOZORDER,
+                )
+                .ok();
+
+                // Reposition sync status row
+                let sync_y = (*st).activity_list_top + new_lb_h + (*st).post_list_gap;
+                let sync_icon_w = 16i32;
+                let sync_gap = 8i32;
+                let progress_h = 10i32;
+                let sync_row_h = (*st).sync_row_h;
+
+                // Update sync icon rect for WM_PAINT
+                (*st).sync_icon_rect = RECT {
+                    left: M,
+                    top: sync_y + (sync_row_h - sync_icon_w) / 2,
+                    right: M + sync_icon_w,
+                    bottom: sync_y + (sync_row_h - sync_icon_w) / 2 + sync_icon_w,
+                };
+
+                let status_x = M + sync_icon_w + sync_gap;
+                let status_w = 180i32;
+                let h_status = GetDlgItem(hwnd, IDC_SYNC_STATUS as i32);
+                SetWindowPos(
+                    h_status,
+                    None,
+                    status_x,
+                    sync_y + (sync_row_h - LBL_H) / 2,
+                    status_w,
+                    LBL_H,
+                    SWP_NOZORDER,
+                )
+                .ok();
+
+                let progress_x = status_x + status_w + sync_gap;
+                let progress_w = INNER_W - (progress_x - M);
+                let h_prog = GetDlgItem(hwnd, IDC_SYNC_PROGRESS as i32);
+                SetWindowPos(
+                    h_prog,
+                    None,
+                    progress_x,
+                    sync_y + (sync_row_h - progress_h) / 2,
+                    progress_w,
+                    progress_h,
+                    SWP_NOZORDER,
+                )
+                .ok();
+
+                // Update divider between activity and bottom bar
+                let divider_y = sync_y + sync_row_h + (*st).post_sync_sect / 2;
+                let div_idx = (*st).divider_activity_idx;
+                if div_idx < (&(*st).dividers).len() {
+                    (&mut (*st).dividers)[div_idx] = divider_y;
+                }
+
+                // Reposition bottom bar controls (single row layout)
+                let bottom_y = sync_y + sync_row_h + (*st).post_sync_sect;
+
+                let row_h = BTN_H;
+                let button_y = bottom_y + (row_h - BTN_H) / 2;
+                let check_y = bottom_y + (row_h - 18) / 2;
+                let footer_h = LBL_H;
+                let footer_y = bottom_y + (row_h - footer_h) / 2;
+                let save_w = 64i32;
+                let update_btn_w = 26i32;
+                let version_w = 72i32;
+                let gap = 8i32;
+                let version_x = M;
+                let update_btn_x = version_x + version_w + gap;
+                let startup_x = update_btn_x + update_btn_w + 14;
+                let two_way_x = startup_x + 78;
+                let save_x = M + INNER_W - save_w;
+
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_START_WINDOWS as i32),
+                    None,
+                    startup_x,
+                    check_y,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                )
+                .ok();
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_SYNC_REMOTE as i32),
+                    None,
+                    two_way_x,
+                    check_y,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                )
+                .ok();
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_SAVE as i32),
+                    None,
+                    save_x,
+                    button_y,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                )
+                .ok();
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_REPO as i32),
+                    None,
+                    version_x,
+                    footer_y,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                )
+                .ok();
+                SetWindowPos(
+                    GetDlgItem(hwnd, IDC_UPDATE_LINK as i32),
+                    None,
+                    update_btn_x,
+                    bottom_y + (row_h - 20) / 2,
+                    0,
+                    0,
+                    SWP_NOZORDER | SWP_NOSIZE,
+                )
+                .ok();
+
+                InvalidateRect(hwnd, None, TRUE);
+            }
+            LRESULT(0)
+        }
 
         tray::WM_TRAY => on_tray(hwnd, lparam),
         WM_APP_LOG => on_app_log(hwnd, lparam),
@@ -581,6 +779,7 @@ unsafe fn on_create(hwnd: HWND) {
     let hfont_hdr = mkfont("Segoe UI", 10, FW_SEMIBOLD.0 as i32);
     let hfont_b = mkfont("Segoe UI", 12, FW_SEMIBOLD.0 as i32);
     let hfont_small = mkfont("Segoe UI", 9, FW_NORMAL.0 as i32);
+    let hfont_link = mkfont_underline("Segoe UI", 9, FW_NORMAL.0 as i32);
 
     let mut cfg = crate::config::load();
     let mut remote_folder_from_xd = false;
@@ -603,10 +802,11 @@ unsafe fn on_create(hwnd: HWND) {
         sync_engine: None,
         update_url: None,
         connected: false,
-        sync_status_text: "Checking local files...".to_string(),
+        sync_status_text: "Checking...".to_string(),
         sync_status_state: crate::sync::ActivityState::Checking as usize,
         sync_progress_done: 0,
         sync_progress_total: 0,
+        sync_started_at: None,
         sync_anim_frame: 0,
         sync_icon: HICON(0),
         sync_icon_rect: RECT::default(),
@@ -617,13 +817,21 @@ unsafe fn on_create(hwnd: HWND) {
         hfont_hdr,
         hfont_b,
         hfont_small,
+        hfont_link,
         br_win: CreateSolidBrush(COLORREF(C_WIN_BG)),
         br_sect: CreateSolidBrush(COLORREF(C_WIN_BG)),
         br_input: CreateSolidBrush(COLORREF(C_INPUT_BG)),
         focused_edit: 0,
         pw_visible: false,
         dividers: Vec::new(),
-        status_rect: RECT::default(),
+        activity_list_top: 0,
+        activity_list_h: 0,
+        post_list_gap: 0,
+        sync_row_h: 0,
+        post_sync_sect: 0,
+        bottom_bar_h: 0,
+        divider_activity_idx: 0,
+        min_client_h: 0,
     });
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
 
@@ -636,6 +844,7 @@ unsafe fn on_create(hwnd: HWND) {
         hfont_hdr,
         hfont_b,
         hfont_small,
+        hfont_link,
     );
 
     let hicon = LoadIconW(hi, w!("APP_ICON_IDLE"))
@@ -700,8 +909,13 @@ unsafe fn on_create(hwnd: HWND) {
     }
 
     if !cfg.webdav_url.is_empty() && !cfg.username.is_empty() && !pass.is_empty() {
+        ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_HIDE);
         let cfg2 = cfg.clone();
         let pass2 = pass.clone();
+        let _ = SetWindowTextW(
+            GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
+            &hstring("Connecting"),
+        );
         std::thread::spawn(move || {
             let ok = crate::webdav::test_connection(&cfg2, &pass2).is_ok();
             PostMessageW(
@@ -744,100 +958,72 @@ unsafe fn build_ui(
     hf_hdr: HFONT,
     hf_b: HFONT,
     hf_small: HFONT,
+    hf_link: HFONT,
 ) {
     let st = &mut *state_ptr(hwnd);
     let mut y = M + 4;
 
     // ── SERVER ────────────────────────────────────────────────────────────────
     {
-        let conn_w = 80i32;
-        let conn_x = M + INNER_W - conn_w;
-        mklabel_hdr(hwnd, hi, "SERVER", M, y, 58, hf_hdr);
+        let status_w = 16i32;
+        let server_status_w = 84i32;
+        let url_w = INNER_W;
+        let server_status_x = M + INNER_W - server_status_w;
+        let status_x = server_status_x - status_w - 4;
 
-        let status_x = M + 62;
-        let sync_icon_w = 16i32;
-        let sync_gap = 6i32;
-        let sync_w = 150i32;
-        let sync_icon_x = M + INNER_W - sync_icon_w;
-        let sync_text_x = sync_icon_x - sync_gap - sync_w;
-        let status_w = sync_text_x - sync_gap - status_x;
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_STATUS_TEXT,
-            "\u{25cf}  NOT CONNECTED",
-            status_x,
-            y + 1,
-            status_w,
-            LBL_H,
-            hf_small,
-        );
-        st.status_rect = RECT {
-            left: status_x,
-            top: y + 1,
-            right: status_x + status_w,
-            bottom: y + 1 + LBL_H,
-        };
-
-        let idle_icon = LoadIconW(hi, w!("APP_ICON_IDLE")).unwrap_or_default();
-        st.sync_icon = idle_icon;
-        st.sync_icon_rect = RECT {
-            left: sync_icon_x,
-            top: y + 1,
-            right: sync_icon_x + sync_icon_w,
-            bottom: y + 1 + 16,
-        };
+        mkfield_label(hwnd, hi, "Server URL", M, y, url_w, hf_small);
         mkstatic_align(
             hwnd,
             hi,
-            IDC_SYNC_STATUS,
-            &st.sync_status_text,
-            sync_text_x,
-            y + 1,
-            sync_w,
+            IDC_SERVER_STATUS,
+            "Not connected",
+            server_status_x,
+            y,
+            server_status_w,
             LBL_H,
             hf_small,
             SS_RIGHT,
         );
-        let progress_y = y + LBL_H + 3;
-        let progress_h = 10;
-        mkprogress(
+        mkstatic_align(
             hwnd,
             hi,
-            IDC_SYNC_PROGRESS,
-            sync_text_x,
-            progress_y,
-            sync_icon_x - sync_gap - sync_text_x,
-            progress_h,
+            IDC_STATUS_TEXT,
+            "\u{25cf}",
+            status_x,
+            y,
+            status_w,
+            LBL_H,
+            hf_small,
+            SS_CENTER,
         );
-        ShowWindow(GetDlgItem(hwnd, IDC_SYNC_PROGRESS as i32), SW_HIDE);
-
-        mkbtn_blue(
-            hwnd,
-            hi,
-            IDC_CONNECT,
-            "Connect",
-            conn_x,
-            y - 1,
-            conn_w,
-            CONN_H,
-            hf_b,
-        );
-        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
-
-        y += HDR_H + PAD + progress_h + 4;
+        y += LBL_H + 4;
 
         mkedit_cue(
             hwnd,
             hi,
             IDC_URL,
             &cfg.webdav_url,
-            "Server URL",
+            "https://example.com/webdav",
             M,
             y,
-            INNER_W,
+            url_w,
             hf,
         );
+
+        // Connect button (hidden until credentials dirty) - overlays same spot
+        mkbtn_blue(
+            hwnd,
+            hi,
+            IDC_CONNECT,
+            "Connect",
+            M + INNER_W - 54,
+            y,
+            54,
+            INP_H,
+            hf_b,
+        );
+        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
+
         y += INP_H + GAP;
 
         let cred_w = (INNER_W - PAD) / 2;
@@ -893,10 +1079,10 @@ unsafe fn build_ui(
             hwnd,
             hi,
             IDC_BROWSE_LOCAL,
-            "Browse...",
+            "...",
             browse_x,
             y,
-            BROWSE_W,
+            34,
             INP_H,
             hf,
         );
@@ -931,10 +1117,10 @@ unsafe fn build_ui(
             hwnd,
             hi,
             IDC_BROWSE_REMOTE,
-            "Browse...",
+            "...",
             browse_x,
             y,
-            BROWSE_W,
+            34,
             INP_H,
             hf,
         );
@@ -949,37 +1135,96 @@ unsafe fn build_ui(
         y += HDR_H + PAD;
 
         let lb_h = 140i32;
+        st.activity_list_top = y;
+        st.activity_list_h = lb_h;
         mklb(hwnd, hi, IDC_ACTIVITY_LIST, M, y, INNER_W, lb_h, hf_small);
-        y += lb_h + SECT;
+        y += lb_h;
+        st.post_list_gap = PAD;
+        y += PAD;
+
+        // Sync status row (icon + text + progress) below activity list
+        let sync_icon_w = 16i32;
+        let sync_gap = 8i32;
+        let progress_h = 10;
+        let sync_row_h = progress_h + 4;
+        st.sync_row_h = sync_row_h;
+
+        // Store icon rect for WM_PAINT
+        st.sync_icon_rect = RECT {
+            left: M,
+            top: y + (sync_row_h - sync_icon_w) / 2,
+            right: M + sync_icon_w,
+            bottom: y + (sync_row_h - sync_icon_w) / 2 + sync_icon_w,
+        };
+
+        let idle_icon = LoadIconW(hi, w!("APP_ICON_IDLE")).unwrap_or_default();
+        st.sync_icon = idle_icon;
+
+        let status_x = M + sync_icon_w + sync_gap;
+        let status_w = 180i32;
+        mkstatic_align(
+            hwnd,
+            hi,
+            IDC_SYNC_STATUS,
+            &st.sync_status_text,
+            status_x,
+            y + (sync_row_h - LBL_H) / 2,
+            status_w,
+            LBL_H,
+            hf_small,
+            SS_LEFT,
+        );
+
+        // Progress bar to the right of status
+        let progress_x = status_x + status_w + sync_gap;
+        let progress_w = INNER_W - (progress_x - M);
+        mkprogress(
+            hwnd,
+            hi,
+            IDC_SYNC_PROGRESS,
+            progress_x,
+            y + (sync_row_h - progress_h) / 2,
+            progress_w,
+            progress_h,
+        );
+        ShowWindow(GetDlgItem(hwnd, IDC_SYNC_PROGRESS as i32), SW_HIDE);
+
+        y += sync_row_h;
+        st.post_sync_sect = SECT;
+        y += SECT;
+
+        st.divider_activity_idx = st.dividers.len();
+        st.dividers.push(y - SECT / 2);
     }
 
     // ── BOTTOM BAR ────────────────────────────────────────────────────────────
+    // Single row: checkboxes on the left, version + update + save on the right.
     {
-        let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
-        let row_y = y;
-        let version_y = row_y + (BTN_H - LBL_H) / 2;
-        let check_y = row_y + (BTN_H - 18) / 2;
+        let row_h = BTN_H;
+        let button_y = y + (row_h - BTN_H) / 2;
+        let check_y = y + (row_h - 18) / 2;
+        let footer_h = LBL_H;
+        let footer_y = y + (row_h - footer_h) / 2;
+        let save_w = 64i32;
+        let update_btn_w = 26i32;
+        let update_btn_h = 20i32;
+        let version_w = 72i32;
+        let gap = 8i32;
+        let version_x = M;
+        let update_btn_x = version_x + version_w + gap;
+        let startup_x = update_btn_x + update_btn_w + 14;
+        let two_way_x = startup_x + 78;
+        let save_x = M + INNER_W - save_w;
+        let update_btn_y = y + (row_h - update_btn_h) / 2;
 
-        mkbtn_grey(hwnd, hi, IDC_REPO, "🌍", M, row_y, 28, BTN_H, hf);
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_VERSION,
-            ver_label,
-            M + 34,
-            version_y,
-            68,
-            LBL_H,
-            hf_small,
-        );
         mkcheck(
             hwnd,
             hi,
             IDC_START_WINDOWS,
-            "Start with Windows",
-            M + 108,
+            "Startup",
+            startup_x,
             check_y,
-            136,
+            70,
             18,
             hf_small,
             cfg.start_with_windows,
@@ -988,31 +1233,43 @@ unsafe fn build_ui(
             hwnd,
             hi,
             IDC_SYNC_REMOTE,
-            "Sync",
-            M + 240,
+            "Two-way sync",
+            two_way_x,
             check_y,
-            56,
+            100,
             18,
             hf_small,
             cfg.sync_remote_changes,
         );
 
-        let save_w = 90i32;
-        let bx_save = M + INNER_W - save_w;
-        let update_w = 30i32;
-        let update_x = bx_save - GAP - update_w;
-        mkbtn_grey(
-            hwnd, hi, IDC_UPDATE, "↓", update_x, row_y, update_w, BTN_H, hf,
-        );
-        ShowWindow(GetDlgItem(hwnd, IDC_UPDATE as i32), SW_HIDE);
         mkbtn_blue(
-            hwnd, hi, IDC_SAVE, "Save", bx_save, row_y, save_w, BTN_H, hf_b,
+            hwnd, hi, IDC_SAVE, "Save", save_x, button_y, save_w, BTN_H, hf_b,
+        );
+        let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
+
+        mklink(
+            hwnd, hi, IDC_REPO, ver_label, version_x, footer_y, version_w, footer_h, hf_link,
         );
 
-        y += BTN_H + M;
+        mkbtn(
+            hwnd,
+            hi,
+            IDC_UPDATE_LINK,
+            "",
+            update_btn_x,
+            update_btn_y,
+            update_btn_w,
+            update_btn_h,
+            hf_small,
+        );
+        ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
+
+        y += row_h + M;
+        st.bottom_bar_h = row_h + M;
     }
 
     // Size window to fit content
+    st.min_client_h = y;
     let mut wr = RECT::default();
     GetWindowRect(hwnd, &mut wr).ok();
     let mut cr = RECT::default();
@@ -1088,6 +1345,36 @@ unsafe fn mkstatic(
         w!("STATIC"),
         &hs,
         WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT),
+        x,
+        y,
+        w,
+        h,
+        hwnd,
+        HMENU(id as isize),
+        hi,
+        None,
+    );
+    SendMessageW(c, WM_SETFONT, WPARAM(hf.0 as usize), LPARAM(1));
+    c
+}
+
+unsafe fn mklink(
+    hwnd: HWND,
+    hi: HINSTANCE,
+    id: u16,
+    text: &str,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    hf: HFONT,
+) -> HWND {
+    let hs = hstring(text);
+    let c = CreateWindowExW(
+        WINDOW_EX_STYLE::default(),
+        w!("STATIC"),
+        &hs,
+        WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_NOTIFY | SS_LEFT),
         x,
         y,
         w,
@@ -1384,14 +1671,21 @@ unsafe fn mkprogress(hwnd: HWND, hi: HINSTANCE, id: u16, x: i32, y: i32, w: i32,
     c
 }
 
+const C_FOLDER_FILL: u32 = 0x00A5C8ED; // light tan/beige folder fill (BGR for #EDC8A5)
+const C_FOLDER_LINE: u32 = 0x00607890; // darker outline for folder (BGR for #907860)
+
 // ── WM_DRAWITEM ───────────────────────────────────────────────────────────────
-const BLUE_IDS: &[u16] = &[IDC_CONNECT, IDC_SAVE];
+const BLUE_IDS: &[u16] = &[IDC_CONNECT, IDC_SAVE, IDC_UPDATE_LINK];
+const BORDERLESS_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_BROWSE_REMOTE];
+const FOLDER_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_BROWSE_REMOTE];
+const UPDATE_IDS: &[u16] = &[IDC_UPDATE_LINK];
 
 unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     let di = &*(lp.0 as *const DRAWITEMSTRUCT);
     let id = di.CtlID as u16;
 
     let is_blue = BLUE_IDS.contains(&id);
+    let is_borderless = BORDERLESS_IDS.contains(&id);
     let pressed = (di.itemState.0 & ODS_SELECTED.0) != 0;
     let disabled = (di.itemState.0 & ODS_DISABLED.0) != 0;
 
@@ -1412,16 +1706,28 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     FillRect(hdc, &rc, hbr);
     DeleteObject(hbr);
 
-    let hp = CreatePen(PS_SOLID, 1, COLORREF(bc));
-    let op = SelectObject(hdc, hp);
-    let ob = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 5, 5);
-    SelectObject(hdc, op);
-    SelectObject(hdc, ob);
-    DeleteObject(hp);
+    // Draw border for non-borderless buttons
+    if !is_borderless {
+        let hp = CreatePen(PS_SOLID, 1, COLORREF(bc));
+        let op = SelectObject(hdc, hp);
+        let ob = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 5, 5);
+        SelectObject(hdc, op);
+        SelectObject(hdc, ob);
+        DeleteObject(hp);
+    }
 
     let len = GetWindowTextLengthW(di.hwndItem);
-    if len > 0 {
+    let is_folder = FOLDER_IDS.contains(&id);
+    let is_update = UPDATE_IDS.contains(&id);
+
+    if is_folder {
+        // Draw a small folder icon via GDI
+        draw_folder_icon(hdc, &rc, fg);
+    } else if is_update {
+        // Draw a download arrow icon via GDI
+        draw_download_icon(hdc, &rc, fg);
+    } else if len > 0 {
         let mut buf = vec![0u16; (len + 1) as usize];
         GetWindowTextW(di.hwndItem, &mut buf);
         let hf = HFONT(SendMessageW(di.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as isize);
@@ -1451,19 +1757,82 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     LRESULT(1)
 }
 
+/// Draw a small folder icon centred in the given rect.
+/// Uses GDI primitives: filled rectangle body + small tab on top-left.
+unsafe fn draw_folder_icon(hdc: HDC, rc: &RECT, _text_clr: u32) {
+    let cx = (rc.left + rc.right) / 2;
+    let cy = (rc.top + rc.bottom) / 2;
+
+    // Folder dimensions
+    let fw = 14i32; // total width
+    let fh = 10i32; // body height
+    let tab_w = 6i32; // tab width
+    let tab_h = 3i32; // tab height
+
+    let x0 = cx - fw / 2;
+    let y0 = cy - (fh + tab_h) / 2 + tab_h;
+
+    // Draw tab (small rectangle on top-left)
+    let tab_brush = CreateSolidBrush(COLORREF(C_FOLDER_FILL));
+    let tab_pen = CreatePen(PS_SOLID, 1, COLORREF(C_FOLDER_LINE));
+    let op = SelectObject(hdc, tab_pen);
+    let ob = SelectObject(hdc, tab_brush);
+
+    // Tab trapezoid as a simple rect
+    Rectangle(hdc, x0, y0 - tab_h, x0 + tab_w, y0 + 1);
+
+    // Body
+    Rectangle(hdc, x0, y0, x0 + fw, y0 + fh);
+
+    SelectObject(hdc, op);
+    SelectObject(hdc, ob);
+    DeleteObject(tab_brush);
+    DeleteObject(tab_pen);
+}
+
+/// Draw a download-arrow icon centred in the given rect.
+/// Arrow pointing down with a horizontal line (tray) below it.
+unsafe fn draw_download_icon(hdc: HDC, rc: &RECT, clr: u32) {
+    let cx = (rc.left + rc.right) / 2;
+    let cy = (rc.top + rc.bottom) / 2;
+
+    let hp = CreatePen(PS_SOLID, 2, COLORREF(clr));
+    let op = SelectObject(hdc, hp);
+
+    // Vertical line (shaft of arrow)
+    MoveToEx(hdc, cx, cy - 5, None);
+    LineTo(hdc, cx, cy + 3);
+
+    // Arrowhead: two diagonal lines from tip
+    MoveToEx(hdc, cx - 3, cy, None);
+    LineTo(hdc, cx, cy + 3);
+    MoveToEx(hdc, cx + 3, cy, None);
+    LineTo(hdc, cx, cy + 3);
+
+    // Tray / base line
+    MoveToEx(hdc, cx - 5, cy + 6, None);
+    LineTo(hdc, cx + 6, cy + 6);
+
+    SelectObject(hdc, op);
+    DeleteObject(hp);
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let id = (wp.0 & 0xFFFF) as u16;
     let notif = (wp.0 >> 16) as u16;
 
-    // EN_CHANGE on credential fields → mark dirty, show Connect button
+    // EN_CHANGE on credential fields → mark dirty, show Connect button, hide status
     if notif == 0x0300u16 && (id == IDC_URL || id == IDC_USERNAME || id == IDC_PASSWORD) {
         let st = stmut(hwnd);
         if !st.creds_dirty {
             st.creds_dirty = true;
             st.connected = false;
-            set_status(hwnd, "\u{25cf}  NOT CONNECTED");
-            InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
+            ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_HIDE);
+            let _ = SetWindowTextW(
+                GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
+                &hstring("Needs connect"),
+            );
             ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_SHOW);
             EnableWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), TRUE);
         }
@@ -1476,6 +1845,16 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
         st.remote_folder_created = false;
         ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
         return LRESULT(0);
+    }
+
+    if notif == STN_CLICKED as u16 {
+        match id {
+            IDC_REPO => {
+                do_open_repo(hwnd);
+                return LRESULT(0);
+            }
+            _ => {}
+        }
     }
 
     match id {
@@ -1493,8 +1872,7 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
         IDC_BROWSE_REMOTE => browse_remote(hwnd),
         IDC_CONNECT => do_connect(hwnd),
         IDC_SAVE => do_save(hwnd),
-        IDC_REPO => do_open_repo(hwnd),
-        IDC_UPDATE => do_update(hwnd),
+        IDC_UPDATE_LINK => do_update(hwnd),
         _ => {}
     }
     LRESULT(0)
@@ -1532,8 +1910,14 @@ unsafe fn do_connect(hwnd: HWND) {
         return;
     }
     let pass = st.password_plain.clone();
-    EnableWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), FALSE);
-    set_status(hwnd, "\u{25cf}  Connecting\u{2026}");
+    ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
+    // Show amber/yellow dot while connecting (color set via WM_CTLCOLORSTATIC)
+    set_status(hwnd, "\u{25cf}");
+    let _ = SetWindowTextW(
+        GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
+        &hstring("Connecting"),
+    );
+    ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
     let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let ok = webdav::test_connection(&cfg, &pass).is_ok();
@@ -1625,8 +2009,9 @@ unsafe fn do_save(hwnd: HWND) {
         }
     }
     if !cfg.webdav_url.is_empty() && !cfg.username.is_empty() && !pass.is_empty() {
-        set_status(hwnd, "\u{25cf}  Connecting\u{2026}");
         ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
+        set_status(hwnd, "\u{25cf}"); // connecting dot
+        ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
         std::thread::spawn(move || {
             let ok = webdav::test_connection(&cfg, &pass).is_ok();
             PostMessageW(
@@ -1658,7 +2043,7 @@ unsafe fn do_update(hwnd: HWND) {
             LPARAM(Box::into_raw(msg) as isize),
         )
         .ok();
-        ShowWindow(GetDlgItem(hwnd, IDC_UPDATE as i32), SW_HIDE);
+        ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
         let raw = hwnd.0 as isize;
         std::thread::spawn(move || {
             let _ = crate::updater::download_and_replace(&url, |pct| {
@@ -1736,8 +2121,31 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     st.sync_progress_done = progress.0;
     st.sync_progress_total = progress.1;
     if wp.0 == crate::sync::ActivityState::Syncing as usize {
+        if !was_syncing {
+            st.sync_started_at = Some(std::time::Instant::now());
+        }
         if progress.1 > 0 {
-            st.sync_status_text = format!("Syncing {}/{}", progress.0.min(progress.1), progress.1);
+            let done = progress.0.min(progress.1);
+            let pct = (done * 100) / progress.1;
+            let eta = if done > 0 {
+                st.sync_started_at.and_then(|started| {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    if elapsed > 0.0 {
+                        let per_item = elapsed / done as f64;
+                        let remaining = ((progress.1 - done) as f64 * per_item).ceil() as u64;
+                        Some(format_eta(remaining))
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            };
+            st.sync_status_text = if let Some(eta) = eta {
+                format!("{done}/{} \u{00B7} ETA {} \u{00B7} {pct}%", progress.1, eta)
+            } else {
+                format!("{done}/{} \u{00B7} {pct}%", progress.1)
+            };
             status_text = &st.sync_status_text;
         }
         if !was_syncing {
@@ -1745,6 +2153,7 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
             let _ = SetTimer(hwnd, IDT_SYNC_ANIM, SYNC_ANIM_MS, None);
         }
     } else {
+        st.sync_started_at = None;
         let _ = KillTimer(hwnd, IDT_SYNC_ANIM);
         let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as isize);
         let hicon = LoadIconW(hi, icon_name).unwrap_or_default();
@@ -1772,11 +2181,7 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
             tray::set_tray_icon_and_tip(
                 hwnd,
                 tip_icon,
-                &format!(
-                    "Backup Sync Tool - Syncing {}/{}",
-                    progress.0.min(progress.1),
-                    progress.1
-                ),
+                &format!("Backup Sync Tool - {}", st.sync_status_text),
             );
         }
     } else {
@@ -1811,12 +2216,8 @@ unsafe fn on_timer(hwnd: HWND, wp: WPARAM) -> LRESULT {
     st.sync_anim_frame = (st.sync_anim_frame + 1) % names.len();
     let hicon = LoadIconW(hi, icon_name).unwrap_or_default();
     if hicon.0 != 0 {
-        let tip = if st.sync_progress_total > 0 {
-            format!(
-                "Backup Sync Tool - Syncing {}/{}",
-                st.sync_progress_done.min(st.sync_progress_total),
-                st.sync_progress_total
-            )
+        let tip = if !st.sync_status_text.is_empty() {
+            format!("Backup Sync Tool - {}", st.sync_status_text)
         } else {
             "Backup Sync Tool - Syncing".to_string()
         };
@@ -1831,17 +2232,24 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let connected = wp.0 == 1;
     let st = stmut(hwnd);
     st.connected = connected;
+    let status_hwnd = GetDlgItem(hwnd, IDC_STATUS_TEXT as i32);
+    let status_label_hwnd = GetDlgItem(hwnd, IDC_SERVER_STATUS as i32);
+    let conn_hwnd = GetDlgItem(hwnd, IDC_CONNECT as i32);
     if connected {
-        set_status(hwnd, "\u{25cf}  Connected");
+        set_status(hwnd, "\u{25cf}"); // Just the dot - green = connected
+        let _ = SetWindowTextW(status_label_hwnd, &hstring("Connected"));
         st.creds_dirty = false;
-        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
+        ShowWindow(conn_hwnd, SW_HIDE);
+        ShowWindow(status_hwnd, SW_SHOW);
         maybe_create_xd_remote_folder(hwnd);
     } else {
-        set_status(hwnd, "\u{25cf}  Not connected");
-        EnableWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), TRUE);
-        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_SHOW);
+        set_status(hwnd, "\u{25cf}"); // Just the dot - red = not connected
+        let _ = SetWindowTextW(status_label_hwnd, &hstring("Offline"));
+        EnableWindow(conn_hwnd, TRUE);
+        ShowWindow(conn_hwnd, SW_SHOW);
+        ShowWindow(status_hwnd, SW_SHOW);
     }
-    InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
+    InvalidateRect(status_hwnd, None, TRUE);
     LRESULT(0)
 }
 
@@ -1851,10 +2259,8 @@ unsafe fn on_app_update(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
     let url = Box::from_raw(lp.0 as *mut String);
     stmut(hwnd).update_url = Some(*url);
-    ShowWindow(GetDlgItem(hwnd, IDC_UPDATE as i32), SW_SHOW);
-    InvalidateRect(GetDlgItem(hwnd, IDC_UPDATE as i32), None, TRUE);
-    let ver_update = concat!("v", env!("CARGO_PKG_VERSION"), " \u{2191}");
-    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_VERSION as i32), &hstring(ver_update));
+    ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_SHOW);
+    InvalidateRect(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), None, TRUE);
     LRESULT(0)
 }
 
@@ -2038,6 +2444,21 @@ unsafe fn mkfont(name: &str, pt: i32, weight: i32) -> HFONT {
     CreateFontIndirectW(&lf)
 }
 
+unsafe fn mkfont_underline(name: &str, pt: i32, weight: i32) -> HFONT {
+    let hdc = GetDC(None);
+    let dpi = GetDeviceCaps(hdc, LOGPIXELSY);
+    ReleaseDC(None, hdc);
+    let h = -(pt * dpi / 72);
+    let nw: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut lf = LOGFONTW::default();
+    lf.lfHeight = h;
+    lf.lfWeight = weight;
+    lf.lfUnderline = 1; // underline for clickable links
+    let n = nw.len().min(lf.lfFaceName.len());
+    lf.lfFaceName[..n].copy_from_slice(&nw[..n]);
+    CreateFontIndirectW(&lf)
+}
+
 fn hstring(s: &str) -> HSTRING {
     HSTRING::from(s)
 }
@@ -2066,17 +2487,17 @@ unsafe fn msgbox_yn(hwnd: HWND, text: &str, title: &str) -> bool {
 }
 
 fn activity_entry(message: &str) -> Option<String> {
-    if message == "Checking remote files" {
-        return Some("Checking remote files".to_string());
+    if message.starts_with("Checking remote files") {
+        return Some(message.to_string());
     }
-    if message == "Counting local files" {
-        return Some("Counting local files".to_string());
+    if message.starts_with("Counting local files") {
+        return Some(message.to_string());
     }
-    if message == "Comparing local to remote" {
-        return Some("Comparing local to remote".to_string());
+    if message.starts_with("Comparing local to remote") {
+        return Some(message.to_string());
     }
-    if message == "Checking remote changes" {
-        return Some("Checking remote changes".to_string());
+    if message.starts_with("Checking remote changes") {
+        return Some(message.to_string());
     }
     if let Some(name) = message.strip_prefix("Uploaded: ") {
         return Some(format!("↑ {}", display_activity_name(name)));
@@ -2089,6 +2510,14 @@ fn activity_entry(message: &str) -> Option<String> {
 
 fn display_activity_name(path: &str) -> &str {
     path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
+fn format_eta(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{}s", seconds)
+    } else {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    }
 }
 
 fn validate_webdav_url(url: &str) -> std::result::Result<(), String> {

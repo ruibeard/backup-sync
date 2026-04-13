@@ -6,5 +6,5 @@
   "remote_folder": "XDPT.59655_Palmeira-Minimercado",
   "start_with_windows": true,
   "sync_remote_changes": true,
-  "parallel_uploads": 10
+  "parallel_uploads": 100
 }
