@@ -21,12 +21,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 fn main() {
+    let start_minimized = !std::env::args().any(|arg| arg == "--show");
     unsafe {
         if OpenMutexW(MUTEX_ALL_ACCESS, false, w!("BackupSyncToolSingleton")).is_ok() {
             let hwnd = FindWindowW(ui::CLASS_NAME, None);
             if hwnd.0 != 0 {
-                ShowWindow(hwnd, SW_RESTORE);
-                let _ = SetForegroundWindow(hwnd);
+                if !start_minimized {
+                    ShowWindow(hwnd, SW_RESTORE);
+                    let _ = SetForegroundWindow(hwnd);
+                }
             }
             return;
         }
@@ -34,7 +37,7 @@ fn main() {
 
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let hinstance = GetModuleHandleW(None).unwrap().into();
-        ui::run(hinstance);
+        ui::run(hinstance, start_minimized);
         drop(instance_mutex);
     }
 }

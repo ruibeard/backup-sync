@@ -191,7 +191,7 @@ struct PickerState {
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
-pub fn run(hinstance: HINSTANCE) {
+pub fn run(hinstance: HINSTANCE, start_minimized: bool) {
     unsafe {
         let icex = INITCOMMONCONTROLSEX {
             dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as u32,
@@ -239,7 +239,7 @@ pub fn run(hinstance: HINSTANCE) {
             hinstance,
             None,
         );
-        ShowWindow(hwnd, SW_SHOW);
+        ShowWindow(hwnd, if start_minimized { SW_HIDE } else { SW_SHOW });
         UpdateWindow(hwnd);
 
         let mut msg = MSG::default();
@@ -3020,11 +3020,8 @@ unsafe fn apply_startup(cfg: &Config) {
     if RegOpenKeyExW(HKEY_CURRENT_USER, key, 0, KEY_SET_VALUE, &mut hk).is_ok() {
         if cfg.start_with_windows {
             if let Ok(exe) = std::env::current_exe() {
-                let v: Vec<u16> = exe
-                    .to_string_lossy()
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect();
+                let command = format!("\"{}\"", exe.to_string_lossy());
+                let v: Vec<u16> = command.encode_utf16().chain(std::iter::once(0)).collect();
                 let _ = RegSetValueExW(
                     hk,
                     w!("BackupSyncTool"),
