@@ -9,7 +9,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 const REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(60);
@@ -31,6 +34,7 @@ struct SyncManifest {
 
 pub struct SyncEngine {
     _watcher: RecommendedWatcher,
+    stop: Arc<AtomicBool>,
 }
 
 pub type LogFn = Arc<dyn Fn(String) + Send + Sync>;
@@ -51,6 +55,7 @@ pub struct ActivityInfo {
 }
 
 pub type ActivityFn = Arc<dyn Fn(ActivityInfo) + Send + Sync>;
+pub type AuthFailedFn = Arc<dyn Fn() + Send + Sync>;
 
 impl SyncEngine {
     pub fn start(
@@ -58,15 +63,19 @@ impl SyncEngine {
         password: String,
         log: LogFn,
         activity: ActivityFn,
+        auth_failed: AuthFailedFn,
     ) -> Result<Self, String> {
         let pending: Arc<Mutex<Vec<(PathBuf, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
         let suppressed: Arc<Mutex<Vec<(PathBuf, Instant)>>> = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
         let pending_clone = pending.clone();
         let suppressed_clone = suppressed.clone();
+        let stop_clone = stop.clone();
         let cfg_arc = Arc::new(cfg);
         let pass_arc = Arc::new(password);
         let log_clone = log.clone();
         let activity_clone = activity.clone();
+        let auth_failed_clone = auth_failed.clone();
         let cfg_watcher = cfg_arc.clone();
         let pass_watcher = pass_arc.clone();
 
@@ -80,7 +89,8 @@ impl SyncEngine {
                 total: 0,
             });
 
-            let remote_manifest = fetch_remote_manifest(&cfg_watcher, &pass_watcher, &log_clone);
+            let remote_manifest =
+                fetch_remote_manifest(&cfg_watcher, &pass_watcher, &log_clone, &auth_failed_clone);
             sync_startup(
                 &cfg_watcher,
                 &pass_watcher,
@@ -90,6 +100,7 @@ impl SyncEngine {
                 &suppressed_clone,
                 &log_clone,
                 &activity_clone,
+                &auth_failed_clone,
             );
 
             activity_clone(ActivityInfo {
@@ -99,8 +110,11 @@ impl SyncEngine {
             });
 
             let mut last_remote_sync = Instant::now();
-            loop {
+            while !stop_clone.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(500));
+                if stop_clone.load(Ordering::Relaxed) {
+                    break;
+                }
                 let now = Instant::now();
                 let due: Vec<PathBuf> = {
                     let mut guard = pending_clone.lock().unwrap();
@@ -130,6 +144,7 @@ impl SyncEngine {
                         &log_clone,
                         cfg_watcher.parallel_uploads,
                         Some(&activity_clone),
+                        &auth_failed_clone,
                     );
                     activity_clone(ActivityInfo {
                         state: ActivityState::Idle,
@@ -141,9 +156,12 @@ impl SyncEngine {
                 if cfg_watcher.sync_remote_changes
                     && last_remote_sync.elapsed() >= REMOTE_SYNC_INTERVAL
                 {
-                    if let Some(remote_manifest) =
-                        fetch_remote_manifest(&cfg_watcher, &pass_watcher, &log_clone)
-                    {
+                    if let Some(remote_manifest) = fetch_remote_manifest(
+                        &cfg_watcher,
+                        &pass_watcher,
+                        &log_clone,
+                        &auth_failed_clone,
+                    ) {
                         apply_remote_manifest(
                             &cfg_watcher,
                             &pass_watcher,
@@ -151,6 +169,7 @@ impl SyncEngine {
                             &remote_manifest,
                             &suppressed_clone,
                             &log_clone,
+                            &auth_failed_clone,
                         );
                     }
                     last_remote_sync = Instant::now();
@@ -188,7 +207,16 @@ impl SyncEngine {
             .watch(Path::new(&watch_path), RecursiveMode::Recursive)
             .map_err(|e| e.to_string())?;
 
-        Ok(SyncEngine { _watcher: watcher })
+        Ok(SyncEngine {
+            _watcher: watcher,
+            stop,
+        })
+    }
+}
+
+impl Drop for SyncEngine {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
     }
 }
 
@@ -201,6 +229,7 @@ fn sync_startup(
     suppressed: &Arc<Mutex<Vec<(PathBuf, Instant)>>>,
     log: &LogFn,
     activity: &ActivityFn,
+    auth_failed: &AuthFailedFn,
 ) {
     let local_state = scan_local_state(cfg);
 
@@ -229,6 +258,7 @@ fn sync_startup(
                 log,
                 cfg.parallel_uploads,
                 Some(activity),
+                auth_failed,
             );
             return;
         }
@@ -238,7 +268,7 @@ fn sync_startup(
             *guard = local_state.clone();
             save_local_manifest(cfg, &guard);
         }
-        save_remote_manifest(cfg, password, &local_state, log);
+        save_remote_manifest(cfg, password, &local_state, log, auth_failed);
         return;
     }
 
@@ -283,6 +313,7 @@ fn sync_startup(
             &downloads,
             suppressed,
             log,
+            auth_failed,
         );
     }
 
@@ -301,6 +332,7 @@ fn sync_startup(
             log,
             cfg.parallel_uploads,
             Some(activity),
+            auth_failed,
         );
     }
 
@@ -311,7 +343,7 @@ fn sync_startup(
         save_local_manifest(cfg, &guard);
     }
 
-    save_remote_manifest(cfg, password, &refreshed, log);
+    save_remote_manifest(cfg, password, &refreshed, log, auth_failed);
 }
 
 fn apply_remote_manifest(
@@ -321,6 +353,7 @@ fn apply_remote_manifest(
     remote_manifest: &SyncManifest,
     suppressed: &Arc<Mutex<Vec<(PathBuf, Instant)>>>,
     log: &LogFn,
+    auth_failed: &AuthFailedFn,
 ) {
     let local_manifest = manifest.lock().unwrap().clone();
     let mut downloads = Vec::new();
@@ -344,6 +377,7 @@ fn apply_remote_manifest(
         &downloads,
         suppressed,
         log,
+        auth_failed,
     );
 
     let refreshed = scan_local_state(cfg);
@@ -362,6 +396,7 @@ fn download_remote_paths(
     paths: &[String],
     suppressed: &Arc<Mutex<Vec<(PathBuf, Instant)>>>,
     log: &LogFn,
+    auth_failed: &AuthFailedFn,
 ) {
     for relative in paths {
         if relative == MANIFEST_NAME {
@@ -376,6 +411,9 @@ fn download_remote_paths(
         let remote_data = match webdav::get_file(cfg, password, &remote_url) {
             Ok(data) => data,
             Err(err) => {
+                if err.is_auth_failed() {
+                    auth_failed();
+                }
                 log(format!("Remote download failed {}: {}", relative, err));
                 continue;
             }
@@ -409,6 +447,7 @@ fn upload_path(
     path: &PathBuf,
     manifest: &Arc<Mutex<SyncManifest>>,
     log: &LogFn,
+    auth_failed: &AuthFailedFn,
 ) {
     if !path.is_file() || should_ignore_path(&cfg.watch_folder, path) {
         return;
@@ -435,9 +474,15 @@ fn upload_path(
     let remote_url = remote_file_url(cfg, &relative);
 
     if let Some(parent) = parent_folder_url(&remote_url) {
-        if let Err(err) =
-            ensure_remote_dirs(cfg, password, cfg.webdav_url.trim_end_matches('/'), &parent)
-        {
+        if let Err(err) = ensure_remote_dirs(
+            cfg,
+            password,
+            remote_base_url(cfg).trim_end_matches('/'),
+            &parent,
+        ) {
+            if err.is_auth_failed() {
+                auth_failed();
+            }
             log(format!("Create folder failed {}: {}", relative, err));
             return;
         }
@@ -447,6 +492,9 @@ fn upload_path(
         Ok(_) => {
             let mtime = file_mtime_epoch(path);
             if let Err(err) = webdav::set_sar_last_modified(cfg, password, &remote_url, mtime) {
+                if err.is_auth_failed() {
+                    auth_failed();
+                }
                 log(format!("Timestamp preserve failed {}: {}", relative, err));
             }
             let mut guard = manifest.lock().unwrap();
@@ -460,7 +508,12 @@ fn upload_path(
             save_local_manifest(cfg, &guard);
             log(format!("Uploaded: {}", relative));
         }
-        Err(err) => log(format!("Upload failed {}: {}", relative, err)),
+        Err(err) => {
+            if err.is_auth_failed() {
+                auth_failed();
+            }
+            log(format!("Upload failed {}: {}", relative, err));
+        }
     }
 }
 
@@ -472,6 +525,7 @@ fn upload_paths_parallel(
     log: &LogFn,
     max_parallel: usize,
     activity: Option<&ActivityFn>,
+    auth_failed: &AuthFailedFn,
 ) -> usize {
     let width = max_parallel.max(1).min(paths.len().max(1));
     let completed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -485,7 +539,7 @@ fn upload_paths_parallel(
                 let Some(path) = queue.lock().unwrap().pop_front() else {
                     break;
                 };
-                upload_path(cfg, password, &path, manifest, log);
+                upload_path(cfg, password, &path, manifest, log, auth_failed);
                 let done = completed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 if let Some(activity) = activity {
                     activity(ActivityInfo {
@@ -499,23 +553,37 @@ fn upload_paths_parallel(
     });
     if total > 0 {
         let snapshot = manifest.lock().unwrap().clone();
-        save_remote_manifest(cfg, password, &snapshot, log);
+        save_remote_manifest(cfg, password, &snapshot, log, auth_failed);
     }
     completed.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-fn fetch_remote_manifest(cfg: &Config, password: &str, log: &LogFn) -> Option<SyncManifest> {
+fn fetch_remote_manifest(
+    cfg: &Config,
+    password: &str,
+    log: &LogFn,
+    auth_failed: &AuthFailedFn,
+) -> Option<SyncManifest> {
     let remote_url = remote_manifest_url(cfg);
     match webdav::get_file(cfg, password, &remote_url) {
         Ok(data) => Some(serde_json::from_slice(&data).unwrap_or_default()),
         Err(err) => {
+            if err.is_auth_failed() {
+                auth_failed();
+            }
             log(format!("Remote manifest unavailable: {}", err));
             None
         }
     }
 }
 
-fn save_remote_manifest(cfg: &Config, password: &str, manifest: &SyncManifest, log: &LogFn) {
+fn save_remote_manifest(
+    cfg: &Config,
+    password: &str,
+    manifest: &SyncManifest,
+    log: &LogFn,
+    auth_failed: &AuthFailedFn,
+) {
     let data = match serde_json::to_vec_pretty(manifest) {
         Ok(data) => data,
         Err(err) => {
@@ -526,9 +594,15 @@ fn save_remote_manifest(cfg: &Config, password: &str, manifest: &SyncManifest, l
 
     let remote_url = remote_manifest_url(cfg);
     if let Some(parent) = parent_folder_url(&remote_url) {
-        if let Err(err) =
-            ensure_remote_dirs(cfg, password, cfg.webdav_url.trim_end_matches('/'), &parent)
-        {
+        if let Err(err) = ensure_remote_dirs(
+            cfg,
+            password,
+            remote_base_url(cfg).trim_end_matches('/'),
+            &parent,
+        ) {
+            if err.is_auth_failed() {
+                auth_failed();
+            }
             log(format!("Manifest folder create failed: {}", err));
             return;
         }
@@ -536,6 +610,9 @@ fn save_remote_manifest(cfg: &Config, password: &str, manifest: &SyncManifest, l
 
     let reader = Cursor::new(data.clone());
     if let Err(err) = webdav::put_file(cfg, password, &remote_url, reader, data.len() as u64) {
+        if err.is_auth_failed() {
+            auth_failed();
+        }
         log(format!("Manifest upload failed: {}", err));
     }
 }
@@ -653,7 +730,7 @@ fn ensure_remote_dirs(
     password: &str,
     remote_base: &str,
     folder_url: &str,
-) -> Result<(), String> {
+) -> Result<(), crate::webdav::WebDavError> {
     let base = remote_base.trim_end_matches('/');
     let folder = folder_url.trim_end_matches('/');
     let relative = folder

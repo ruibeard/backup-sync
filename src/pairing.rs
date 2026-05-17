@@ -3,7 +3,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize)]
 pub struct PairStartRequest {
     pub machine_name: String,
+    pub windows_user: String,
     pub app_version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_folder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detected_customer: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -20,13 +25,26 @@ pub struct PairStatusResponse {
     pub device_token: Option<String>,
     pub webdav_url: Option<String>,
     pub username: Option<String>,
+    pub password: Option<String>,
     pub remote_folder: Option<String>,
+    pub credential_profile_id: Option<u64>,
+    pub credential_version: Option<u64>,
 }
 
-pub fn start_pairing(api_base: &str, machine_name: &str, app_version: &str) -> Option<PairStartResponse> {
+pub fn start_pairing(
+    api_base: &str,
+    machine_name: &str,
+    windows_user: &str,
+    app_version: &str,
+    detected_folder: Option<String>,
+    detected_customer: Option<String>,
+) -> Option<PairStartResponse> {
     let req = PairStartRequest {
         machine_name: machine_name.to_string(),
+        windows_user: windows_user.to_string(),
         app_version: app_version.to_string(),
+        detected_folder,
+        detected_customer,
     };
     let url = format!("{}/api/pair/start", api_base.trim_end_matches('/'));
     let res = ureq::post(&url)

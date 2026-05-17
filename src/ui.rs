@@ -18,9 +18,13 @@ use crate::logs;
 use crate::secret;
 use crate::tray;
 use crate::webdav;
+use qrcodegen::{QrCode, QrCodeEcc};
 use std::ffi::c_void;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Gdi::*;
@@ -59,7 +63,6 @@ const IDC_URL: u16 = 103;
 const IDC_USERNAME: u16 = 104;
 const IDC_PASSWORD: u16 = 105;
 const IDC_REMOTE_FOLDER: u16 = 106;
-const IDC_BROWSE_REMOTE: u16 = 107;
 const IDC_CONNECT: u16 = 108;
 const IDC_STATUS_TEXT: u16 = 109;
 const IDC_SERVER_STATUS: u16 = 123;
@@ -73,31 +76,23 @@ const IDC_SYNC_PROGRESS: u16 = 118;
 const IDC_REPO: u16 = 120;
 const IDC_DEST_CREATED: u16 = 121;
 const IDC_UPDATE_LINK: u16 = 122;
-const IDC_PICKER_PATH: u16 = 201;
-const IDC_PICKER_LIST: u16 = 202;
-const IDC_PICKER_UP: u16 = 203;
-const IDC_PICKER_SELECT: u16 = 205;
-const IDC_PICKER_CANCEL: u16 = 206;
 const IDC_SERVER_HDR: u16 = 207;
-const IDC_SERVER_URL_LABEL: u16 = 208;
-const IDC_SERVER_USERNAME_LABEL: u16 = 209;
-const IDC_SERVER_PASSWORD_LABEL: u16 = 210;
 const IDC_GITHUB: u16 = 211;
 const IDC_AUTHOR: u16 = 212;
 const IDC_ORIGIN_LABEL: u16 = 213;
 const IDC_DEST_LABEL: u16 = 214;
 const IDC_ACTIVITY_HDR: u16 = 215;
-const IDC_SERVER_EDIT: u16 = 216;
 const IDC_PAIR_DEVICE: u16 = 217;
 
 const WM_APP_LOG: u32 = WM_APP + 10;
 const WM_APP_CONNECTED: u32 = WM_APP + 11;
 const WM_APP_UPDATE: u32 = WM_APP + 12;
 const WM_APP_REMOTE_FOLDER: u32 = WM_APP + 13;
-const WM_APP_PICKER_LOADED: u32 = WM_APP + 14;
-const WM_APP_DEST_READY: u32 = WM_APP + 15;
 const WM_APP_SYNC_ACTIVITY: u32 = WM_APP + 16;
 const WM_APP_PAIR_RESULT: u32 = WM_APP + 17;
+const WM_APP_PAIR_STARTED: u32 = WM_APP + 18;
+const WM_APP_CREDENTIAL_REFRESH: u32 = WM_APP + 19;
+const WM_APP_REFRESH_RESULT: u32 = WM_APP + 20;
 const IDT_SYNC_ANIM: usize = 1;
 const SYNC_ANIM_MS: u32 = 120;
 
@@ -110,9 +105,10 @@ const SS_NOTIFY: u32 = 0x0100;
 pub const CLASS_NAME: PCWSTR = w!("BackupSyncToolWnd");
 const REPO_URL: &str = "https://github.com/ruibeard/backup-sync-tool";
 const AUTHOR_URL: &str = "https://ruialmeida.me";
-const PICKER_CLASS_NAME: PCWSTR = w!("BackupSyncToolRemotePickerWnd");
-const PICKER_CLIENT_W: i32 = 430;
-const PICKER_CLIENT_H: i32 = 430;
+const PAIR_QR_CLASS_NAME: PCWSTR = w!("BackupSyncToolPairQrWnd");
+const PAIR_QR_CLIENT_W: i32 = 380;
+const PAIR_QR_CLIENT_H: i32 = 475;
+const IDC_PAIR_QR_LINK: u16 = 303;
 
 // ── Layout — 8/12/20 rhythm ──────────────────────────────────────────────────
 const WIN_W: i32 = 460; // client width (slightly narrower, cleaner)
@@ -126,7 +122,6 @@ const SMALL_BTN_H: i32 = 24; // compact secondary button height
 const HDR_H: i32 = 20; // section heading height
 const LBL_H: i32 = 18; // label text height
 const BROWSE_W: i32 = 34; // folder icon button width
-const SERVER_EDIT_W: i32 = 54;
 const PAIR_BTN_W: i32 = 46;
 const MIN_ACTIVITY_LIST_H: i32 = 96;
 const INNER_W: i32 = WIN_W - M * 2; // usable inner width
@@ -149,13 +144,9 @@ struct WndState {
     sync_icon: HICON,
     sync_icon_rect: RECT,
     remote_folder_from_xd: bool,
-    remote_folder_created: bool,
-    /// True when URL/username/password have been edited since the last save/connect
-    creds_dirty: bool,
-    /// Whether the SERVER credentials section is collapsed
-    server_collapsed: bool,
-    /// Height of the server section controls (URL + username/password rows) when expanded
-    server_section_h: i32,
+    detected_customer: Option<String>,
+    server_tooltip: HWND,
+    server_tooltip_text: Vec<u16>,
     #[allow(dead_code)]
     hfont: HFONT,
     #[allow(dead_code)]
@@ -190,34 +181,53 @@ struct WndState {
     divider_activity_idx: usize,
     /// Layout: minimum window client height
     min_client_h: i32,
-}
-
-struct PickerResult {
-    folder: Option<String>,
-}
-
-struct PickerLoadResult {
-    entries: Vec<String>,
-    error: Option<String>,
-    resolved_folder: String,
+    pair_qr_hwnd: HWND,
+    pair_cancel: Option<Arc<AtomicBool>>,
+    pair_id: u64,
+    refresh_in_progress: bool,
 }
 
 struct PairResult {
+    pair_id: u64,
     device_token: String,
     webdav_url: Option<String>,
     username: Option<String>,
-    remote_folder: Option<String>,
+    password: Option<String>,
+    remote_folder: String,
+    credential_profile_id: Option<u64>,
+    credential_version: Option<u64>,
 }
 
-struct PickerState {
-    cfg: Config,
+struct PairStarted {
+    pair_id: u64,
+    code: String,
+    approve_url: String,
+}
+
+struct PairError {
+    pair_id: u64,
+    message: String,
+}
+
+struct RefreshResult {
+    webdav_url: Option<String>,
+    username: Option<String>,
     password: String,
-    current_folder: String,
-    selected_folder: Option<String>,
-    result: *mut PickerResult,
+    remote_folder: Option<String>,
+    credential_profile_id: Option<u64>,
+    credential_version: Option<u64>,
+}
+
+struct RefreshError {
+    message: String,
+}
+
+struct PairQrState {
+    parent: HWND,
+    code: String,
+    approve_url: String,
     hfont: HFONT,
     hfont_b: HFONT,
-    busy: bool,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -243,17 +253,17 @@ pub fn run(hinstance: HINSTANCE, start_minimized: bool) {
         };
         RegisterClassExW(&wc);
 
-        let picker_wc = WNDCLASSEXW {
+        let pair_qr_wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(remote_picker_wnd_proc),
+            lpfnWndProc: Some(pair_qr_wnd_proc),
             hInstance: hinstance,
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hbrBackground: HBRUSH((COLOR_WINDOW.0 + 1) as isize),
-            lpszClassName: PICKER_CLASS_NAME,
+            lpszClassName: PAIR_QR_CLASS_NAME,
             ..Default::default()
         };
-        RegisterClassExW(&picker_wc);
+        RegisterClassExW(&pair_qr_wc);
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -409,9 +419,11 @@ unsafe extern "system" fn wnd_proc(
         WM_APP_CONNECTED => on_app_connected(hwnd, wparam),
         WM_APP_UPDATE => on_app_update(hwnd, wparam, lparam),
         WM_APP_REMOTE_FOLDER => on_app_remote_folder(hwnd, lparam),
-        WM_APP_DEST_READY => on_app_dest_ready(hwnd, wparam),
         WM_APP_SYNC_ACTIVITY => on_app_sync_activity(hwnd, wparam, lparam),
+        WM_APP_PAIR_STARTED => on_app_pair_started(hwnd, lparam),
         WM_APP_PAIR_RESULT => on_app_pair_result(hwnd, wparam, lparam),
+        WM_APP_CREDENTIAL_REFRESH => on_app_credential_refresh(hwnd),
+        WM_APP_REFRESH_RESULT => on_app_refresh_result(hwnd, wparam, lparam),
         WM_TIMER => on_timer(hwnd, wparam),
 
         WM_CLOSE => {
@@ -675,19 +687,18 @@ unsafe fn on_create(hwnd: HWND) {
     let hfont_link = mkfont_underline("Segoe UI", 9, FW_NORMAL.0 as i32);
 
     let mut cfg = crate::config::load();
-    let mut remote_folder_from_xd = false;
+    let remote_folder_from_xd = false;
     if cfg.watch_folder.is_empty() {
         if let Some(path) = crate::xd::default_watch_folder() {
             cfg.watch_folder = path;
         }
     }
-    if cfg.remote_folder.is_empty() {
-        if let Some(remote_folder) = crate::xd::detect_default_remote_folder() {
-            cfg.remote_folder = remote_folder;
-            remote_folder_from_xd = true;
-        }
-    }
     let pass = secret::decrypt(&cfg.password_enc).unwrap_or_default();
+    let sync_configured = !cfg.watch_folder.is_empty()
+        && !cfg.webdav_url.is_empty()
+        && !cfg.username.is_empty()
+        && !pass.is_empty()
+        && !cfg.remote_folder.is_empty();
 
     let state = Box::new(WndState {
         config: cfg.clone(),
@@ -695,8 +706,16 @@ unsafe fn on_create(hwnd: HWND) {
         sync_engine: None,
         update_url: None,
         connected: false,
-        sync_status_text: "Checking...".to_string(),
-        sync_status_state: crate::sync::ActivityState::Checking as usize,
+        sync_status_text: if sync_configured {
+            "Starting...".to_string()
+        } else {
+            "Not configured".to_string()
+        },
+        sync_status_state: if sync_configured {
+            crate::sync::ActivityState::Checking as usize
+        } else {
+            crate::sync::ActivityState::Idle as usize
+        },
         sync_progress_done: 0,
         sync_progress_total: 0,
         sync_started_at: None,
@@ -704,10 +723,9 @@ unsafe fn on_create(hwnd: HWND) {
         sync_icon: HICON(0),
         sync_icon_rect: RECT::default(),
         remote_folder_from_xd,
-        remote_folder_created: false,
-        creds_dirty: false,
-        server_collapsed: true,
-        server_section_h: 0,
+        detected_customer: None,
+        server_tooltip: HWND(0),
+        server_tooltip_text: Vec::new(),
         hfont,
         hfont_hdr,
         hfont_b,
@@ -727,6 +745,10 @@ unsafe fn on_create(hwnd: HWND) {
         bottom_bar_h: 0,
         divider_activity_idx: 0,
         min_client_h: 0,
+        pair_qr_hwnd: HWND(0),
+        pair_cancel: None,
+        pair_id: 0,
+        refresh_in_progress: false,
     });
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
 
@@ -741,6 +763,7 @@ unsafe fn on_create(hwnd: HWND) {
         hfont_small,
         hfont_link,
     );
+    apply_server_readonly(hwnd);
 
     let hicon = LoadIconW(hi, w!("APP_ICON_IDLE"))
         .unwrap_or(LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
@@ -776,18 +799,17 @@ unsafe fn on_create(hwnd: HWND) {
         )
         .ok();
     });
+    let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
+        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
+    });
 
-    if !cfg.watch_folder.is_empty()
-        && !cfg.webdav_url.is_empty()
-        && !cfg.username.is_empty()
-        && !pass.is_empty()
-        && !cfg.remote_folder.is_empty()
-    {
+    if sync_configured {
         match crate::sync::SyncEngine::start(
             cfg.clone(),
             pass.clone(),
             log.clone(),
             activity.clone(),
+            auth_failed.clone(),
         ) {
             Ok(engine) => stmut(hwnd).sync_engine = Some(engine),
             Err(err) => {
@@ -801,6 +823,22 @@ unsafe fn on_create(hwnd: HWND) {
                 .ok();
             }
         }
+    }
+
+    if !is_paired(&cfg) && (cfg.remote_folder.trim().is_empty() || is_root_remote_folder(&cfg.remote_folder)) {
+        std::thread::spawn(move || {
+            if let Some(detected) = crate::xd::detect_customer_hint() {
+                unsafe {
+                    PostMessageW(
+                        HWND(raw),
+                        WM_APP_REMOTE_FOLDER,
+                        WPARAM(0),
+                        LPARAM(Box::into_raw(Box::new(detected)) as isize),
+                    )
+                    .ok();
+                }
+            }
+        });
     }
 
     if !cfg.webdav_url.is_empty() && !cfg.username.is_empty() && !pass.is_empty() {
@@ -848,7 +886,7 @@ unsafe fn build_ui(
     hwnd: HWND,
     hi: HINSTANCE,
     cfg: &Config,
-    pass: &str,
+    _pass: &str,
     hf: HFONT,
     hf_hdr: HFONT,
     hf_b: HFONT,
@@ -861,8 +899,7 @@ unsafe fn build_ui(
     // ── SERVER ────────────────────────────────────────────────────────────────
     {
         let status_w = 16i32;
-        let server_edit_x = M + INNER_W - SERVER_EDIT_W;
-        let pair_x = server_edit_x - PAD - PAIR_BTN_W;
+        let pair_x = M + INNER_W - PAIR_BTN_W;
         let server_status_w = 84i32;
         let server_status_x = pair_x - PAD - server_status_w;
         let status_x = server_status_x - status_w - 4;
@@ -906,17 +943,6 @@ unsafe fn build_ui(
         mkbtn_grey(
             hwnd,
             hi,
-            IDC_SERVER_EDIT,
-            "Edit",
-            server_edit_x,
-            y + (HDR_H - SMALL_BTN_H) / 2,
-            SERVER_EDIT_W,
-            SMALL_BTN_H,
-            hf_small,
-        );
-        mkbtn_grey(
-            hwnd,
-            hi,
             IDC_PAIR_DEVICE,
             "Pair",
             pair_x,
@@ -925,109 +951,9 @@ unsafe fn build_ui(
             SMALL_BTN_H,
             hf_small,
         );
+        install_server_tooltip(hwnd, hi);
         y += HDR_H + PAD;
-
-        // --- Collapsible controls (hidden by default) ---
-        let section_top = y;
-        let url_w = INNER_W;
-
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_SERVER_URL_LABEL,
-            "Server URL",
-            M,
-            y,
-            url_w,
-            LBL_H,
-            hf_small,
-        );
-        y += LBL_H + 4;
-
-        mkedit_cue(
-            hwnd,
-            hi,
-            IDC_URL,
-            &cfg.webdav_url,
-            "https://example.com/webdav",
-            M,
-            y,
-            url_w,
-            hf,
-        );
-
-        // Connect button overlays URL row right edge
-        mkbtn_blue(
-            hwnd,
-            hi,
-            IDC_CONNECT,
-            "Connect",
-            M + INNER_W - 54,
-            y,
-            54,
-            INP_H,
-            hf_b,
-        );
-        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
-        y += INP_H + GAP;
-
-        let cred_w = (INNER_W - PAD) / 2;
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_SERVER_USERNAME_LABEL,
-            "Username",
-            M,
-            y,
-            cred_w,
-            LBL_H,
-            hf_small,
-        );
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_SERVER_PASSWORD_LABEL,
-            "Password",
-            M + cred_w + PAD,
-            y,
-            cred_w,
-            LBL_H,
-            hf_small,
-        );
-        y += LBL_H + 4;
-
-        mkedit_cue(
-            hwnd,
-            hi,
-            IDC_USERNAME,
-            &cfg.username,
-            "Username",
-            M,
-            y,
-            cred_w,
-            hf,
-        );
-        mkedit_pw_eye(
-            hwnd,
-            hi,
-            IDC_PASSWORD,
-            pass,
-            M + cred_w + PAD,
-            y,
-            cred_w,
-            hf,
-        );
-        y += INP_H + SECT;
-
-        // Record how tall this section is so toggle can shift everything below
-        st.server_section_h = y - section_top;
-
-        if st.server_collapsed {
-            y = section_top;
-        }
-
-        st.dividers
-            .push(y - SECT / 2 + if st.server_collapsed { SECT / 2 } else { 0 });
+        st.dividers.push(y - SECT / 2);
     }
 
     // ── FOLDERS ───────────────────────────────────────────────────────────────
@@ -1071,14 +997,21 @@ unsafe fn build_ui(
         );
         y += INP_H + GAP;
 
+        let destination_text =
+            destination_display_text(cfg, st.remote_folder_from_xd, st.detected_customer.as_deref());
+
         mkstatic(
             hwnd,
             hi,
             IDC_DEST_LABEL,
-            "Destination folder",
+            if is_paired(cfg) {
+                "Destination folder"
+            } else {
+                "Detected customer"
+            },
             M,
             y,
-            112,
+            150,
             LBL_H,
             hf_small,
         );
@@ -1095,25 +1028,14 @@ unsafe fn build_ui(
         );
         ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
         y += LBL_H + 4;
-        mkedit_cue(
+        mkstatic(
             hwnd,
             hi,
             IDC_REMOTE_FOLDER,
-            &cfg.remote_folder,
-            "XDPT.59655-Palmeira-Minimercado",
+            &destination_text,
             M,
             y,
-            inp_w,
-            hf,
-        );
-        mkbtn_grey(
-            hwnd,
-            hi,
-            IDC_BROWSE_REMOTE,
-            "...",
-            browse_x,
-            y,
-            34,
+            INNER_W,
             INP_H,
             hf,
         );
@@ -1298,7 +1220,6 @@ unsafe fn build_ui(
             author_h,
             hf_link,
         );
-        y += author_h + 4 + M;
         st.bottom_bar_h = row_h + author_h + 4 + M;
     }
 
@@ -1325,53 +1246,6 @@ unsafe fn build_ui(
 }
 
 // ── Control helpers ───────────────────────────────────────────────────────────
-
-unsafe fn mklabel_hdr(
-    hwnd: HWND,
-    hi: HINSTANCE,
-    text: &str,
-    x: i32,
-    y: i32,
-    w: i32,
-    hf: HFONT,
-) -> HWND {
-    let hs = hstring(text);
-    let c = CreateWindowExW(
-        WINDOW_EX_STYLE::default(),
-        w!("STATIC"),
-        &hs,
-        WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT),
-        x,
-        y,
-        w,
-        HDR_H,
-        hwnd,
-        HMENU(0isize),
-        hi,
-        None,
-    );
-    SendMessageW(c, WM_SETFONT, WPARAM(hf.0 as usize), LPARAM(1));
-    c
-}
-
-unsafe fn mkfield_label(hwnd: HWND, hi: HINSTANCE, text: &str, x: i32, y: i32, w: i32, hf: HFONT) {
-    let hs = hstring(text);
-    let c = CreateWindowExW(
-        WINDOW_EX_STYLE::default(),
-        w!("STATIC"),
-        &hs,
-        WS_CHILD | WS_VISIBLE | WINDOW_STYLE(SS_LEFT),
-        x,
-        y,
-        w,
-        LBL_H,
-        hwnd,
-        HMENU(0isize),
-        hi,
-        None,
-    );
-    SendMessageW(c, WM_SETFONT, WPARAM(hf.0 as usize), LPARAM(1));
-}
 
 unsafe fn mkstatic(
     hwnd: HWND,
@@ -1516,33 +1390,6 @@ unsafe fn mkedit_raw(
     c
 }
 
-/// Password edit with eye icon inside right padding (no separate Show button)
-unsafe fn mkedit_pw_eye(
-    hwnd: HWND,
-    hi: HINSTANCE,
-    id: u16,
-    text: &str,
-    x: i32,
-    y: i32,
-    w: i32,
-    hf: HFONT,
-) -> HWND {
-    let c = mkedit_raw(hwnd, hi, id, text, x, y, w, hf);
-    // Start hidden
-    SendMessageW(c, EM_SETPASSWORDCHAR, WPARAM(0x2022), LPARAM(0));
-    // Add right-side padding so text doesn't overlap the eye icon
-    // EM_SETMARGINS (0x00D3): HIWORD = right margin, LOWORD = left margin flag
-    // EC_RIGHTMARGIN = 0x0002
-    let right_margin = (EYE_ZONE_W as u32) << 16;
-    SendMessageW(
-        c,
-        EM_SETMARGINS,
-        WPARAM(0x0002),
-        LPARAM(right_margin as isize),
-    );
-    c
-}
-
 unsafe fn mkbtn(
     hwnd: HWND,
     hi: HINSTANCE,
@@ -1597,36 +1444,6 @@ unsafe fn mkbtn_grey(
     hf: HFONT,
 ) -> HWND {
     mkbtn(hwnd, hi, id, text, x, y, w, h, hf)
-}
-
-unsafe fn mkbtn_std(
-    hwnd: HWND,
-    hi: HINSTANCE,
-    id: u16,
-    text: &str,
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-    hf: HFONT,
-) -> HWND {
-    let hs = hstring(text);
-    let c = CreateWindowExW(
-        WINDOW_EX_STYLE::default(),
-        w!("BUTTON"),
-        &hs,
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_PUSHBUTTON as u32),
-        x,
-        y,
-        w,
-        h,
-        hwnd,
-        HMENU(id as isize),
-        hi,
-        None,
-    );
-    SendMessageW(c, WM_SETFONT, WPARAM(hf.0 as usize), LPARAM(1));
-    c
 }
 
 unsafe fn mkcheck(
@@ -1716,13 +1533,134 @@ unsafe fn mkprogress(hwnd: HWND, hi: HINSTANCE, id: u16, x: i32, y: i32, w: i32,
     c
 }
 
+unsafe fn install_server_tooltip(hwnd: HWND, hi: HINSTANCE) {
+    let tooltip = CreateWindowExW(
+        WINDOW_EX_STYLE::default(),
+        TOOLTIPS_CLASSW,
+        w!(""),
+        WS_POPUP | WINDOW_STYLE(TTS_ALWAYSTIP),
+        0,
+        0,
+        0,
+        0,
+        hwnd,
+        HMENU(0),
+        hi,
+        None,
+    );
+    if tooltip.0 == 0 {
+        return;
+    }
+
+    let st = stmut(hwnd);
+    st.server_tooltip = tooltip;
+    st.server_tooltip_text = server_tooltip_text(&st.config)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_STATUS_TEXT] {
+        let target = GetDlgItem(hwnd, target_id as i32);
+        if target.0 == 0 {
+            continue;
+        }
+        let mut ti = TTTOOLINFOW {
+            cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+            uFlags: TTF_IDISHWND | TTF_SUBCLASS,
+            hwnd,
+            uId: target.0 as usize,
+            rect: RECT::default(),
+            hinst: hi,
+            lpszText: PWSTR(st.server_tooltip_text.as_mut_ptr()),
+            lParam: LPARAM(0),
+            lpReserved: std::ptr::null_mut(),
+        };
+        SendMessageW(
+            tooltip,
+            TTM_ADDTOOLW,
+            WPARAM(0),
+            LPARAM((&mut ti as *mut TTTOOLINFOW) as isize),
+        );
+    }
+}
+
+fn server_tooltip_text(cfg: &Config) -> String {
+    let url = if cfg.webdav_url.trim().is_empty() {
+        "not set"
+    } else {
+        cfg.webdav_url.trim()
+    };
+    let folder = if cfg.remote_folder.trim().is_empty() {
+        "waiting for Laravel approval"
+    } else {
+        cfg.remote_folder.trim()
+    };
+    format!("Server: {url}\nDestination: {folder}")
+}
+
+fn destination_display_text(
+    cfg: &Config,
+    remote_folder_from_xd: bool,
+    detected_customer: Option<&str>,
+) -> String {
+    if is_paired(cfg) {
+        return cfg.remote_folder.clone();
+    }
+    if remote_folder_from_xd && !cfg.remote_folder.trim().is_empty() {
+        if let Some(customer) = detected_customer.and_then(non_empty_str) {
+            return format!("{customer} ({})", cfg.remote_folder);
+        }
+        return cfg.remote_folder.clone();
+    }
+    "Waiting for pairing approval".to_string()
+}
+
+fn non_empty_str(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
+unsafe fn update_server_tooltip(hwnd: HWND) {
+    let st = stmut(hwnd);
+    if st.server_tooltip.0 == 0 {
+        return;
+    }
+    st.server_tooltip_text = server_tooltip_text(&st.config)
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_STATUS_TEXT] {
+        let target = GetDlgItem(hwnd, target_id as i32);
+        if target.0 == 0 {
+            continue;
+        }
+        let mut ti = TTTOOLINFOW {
+            cbSize: std::mem::size_of::<TTTOOLINFOW>() as u32,
+            uFlags: TTF_IDISHWND | TTF_SUBCLASS,
+            hwnd,
+            uId: target.0 as usize,
+            rect: RECT::default(),
+            hinst: HINSTANCE(0),
+            lpszText: PWSTR(st.server_tooltip_text.as_mut_ptr()),
+            lParam: LPARAM(0),
+            lpReserved: std::ptr::null_mut(),
+        };
+        SendMessageW(
+            st.server_tooltip,
+            TTM_UPDATETIPTEXTW,
+            WPARAM(0),
+            LPARAM((&mut ti as *mut TTTOOLINFOW) as isize),
+        );
+    }
+}
+
 const C_FOLDER_FILL: u32 = 0x00A5C8ED; // light tan/beige folder fill (BGR for #EDC8A5)
 const C_FOLDER_LINE: u32 = 0x00607890; // darker outline for folder (BGR for #907860)
 
 // ── WM_DRAWITEM ───────────────────────────────────────────────────────────────
-const BLUE_IDS: &[u16] = &[IDC_CONNECT, IDC_SAVE, IDC_UPDATE_LINK];
-const BORDERLESS_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_BROWSE_REMOTE, IDC_GITHUB];
-const FOLDER_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_BROWSE_REMOTE];
+const BLUE_IDS: &[u16] = &[IDC_SAVE, IDC_UPDATE_LINK];
+const BORDERLESS_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_GITHUB];
+const FOLDER_IDS: &[u16] = &[IDC_BROWSE_LOCAL];
 const UPDATE_IDS: &[u16] = &[IDC_UPDATE_LINK];
 const GITHUB_IDS: &[u16] = &[IDC_GITHUB];
 
@@ -1883,37 +1821,8 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let id = (wp.0 & 0xFFFF) as u16;
     let notif = (wp.0 >> 16) as u16;
 
-    // EN_CHANGE on credential fields → mark dirty, show Connect button, hide status
-    if notif == 0x0300u16 && (id == IDC_URL || id == IDC_USERNAME || id == IDC_PASSWORD) {
-        let st = stmut(hwnd);
-        if !st.creds_dirty {
-            st.creds_dirty = true;
-            st.connected = false;
-            ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_HIDE);
-            let _ = SetWindowTextW(
-                GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
-                &hstring("Needs connect"),
-            );
-            ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_SHOW);
-            EnableWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), TRUE);
-        }
-        return LRESULT(0);
-    }
-
-    if notif == 0x0300u16 && id == IDC_REMOTE_FOLDER {
-        let st = stmut(hwnd);
-        st.remote_folder_from_xd = false;
-        st.remote_folder_created = false;
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
-        return LRESULT(0);
-    }
-
     if notif == STN_CLICKED as u16 {
         match id {
-            IDC_SERVER_EDIT => {
-                toggle_server_section(hwnd);
-                return LRESULT(0);
-            }
             IDC_REPO => {
                 do_open_repo(hwnd);
                 return LRESULT(0);
@@ -1938,7 +1847,6 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
             DestroyWindow(hwnd).ok();
         }
         IDC_BROWSE_LOCAL => browse_local(hwnd),
-        IDC_BROWSE_REMOTE => browse_remote(hwnd),
         IDC_CONNECT => do_connect(hwnd),
         IDC_PAIR_DEVICE => do_pair_device(hwnd),
         IDC_SAVE => do_save(hwnd),
@@ -2037,6 +1945,16 @@ unsafe fn do_pair_device(hwnd: HWND) {
     let st = stmut(hwnd);
     read_ctrls(hwnd, st);
     let api_base = st.config.pair_api_base.clone();
+    let mut detected_folder = if st.remote_folder_from_xd {
+        non_empty(st.config.remote_folder.clone())
+    } else {
+        None
+    };
+    let mut detected_customer = st.detected_customer.clone().and_then(non_empty);
+    let cancel = Arc::new(AtomicBool::new(false));
+    st.pair_id = st.pair_id.wrapping_add(1);
+    let pair_id = st.pair_id;
+    st.pair_cancel = Some(cancel.clone());
     let raw = hwnd.0 as isize;
 
     EnableWindow(GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32), FALSE);
@@ -2046,28 +1964,47 @@ unsafe fn do_pair_device(hwnd: HWND) {
     );
 
     std::thread::spawn(move || {
+        if detected_folder.is_none() || detected_customer.is_none() {
+            if let Some(detected) = crate::xd::detect_customer_hint() {
+                detected_folder.get_or_insert(detected.folder);
+                if let Some(customer) = non_empty(detected.customer) {
+                    detected_customer.get_or_insert(customer);
+                }
+            }
+        }
         let machine = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".to_string());
+        let windows_user = std::env::var("USERNAME").unwrap_or_default();
         let version = env!("CARGO_PKG_VERSION");
-        let result = match crate::pairing::start_pairing(&api_base, &machine, version) {
+        let result = match crate::pairing::start_pairing(
+            &api_base,
+            &machine,
+            &windows_user,
+            version,
+            detected_folder,
+            detected_customer,
+        ) {
             Some(start) => {
-                let qr_url = format!(
-                    "https://api.qrserver.com/v1/create-qr-code/?size=320x320&data={}",
-                    url_encode(&start.approve_url)
-                );
                 unsafe {
-                    let _ = ShellExecuteW(
+                    let started = Box::new(PairStarted {
+                        pair_id,
+                        code: start.code.clone(),
+                        approve_url: start.approve_url.clone(),
+                    });
+                    PostMessageW(
                         HWND(raw),
-                        w!("open"),
-                        &hstring(&qr_url),
-                        None,
-                        None,
-                        SW_SHOWNORMAL,
-                    );
+                        WM_APP_PAIR_STARTED,
+                        WPARAM(0),
+                        LPARAM(Box::into_raw(started) as isize),
+                    )
+                    .ok();
                 }
 
                 let started = std::time::Instant::now();
                 let sleep_ms = start.poll_interval_ms.clamp(1000, 10_000);
                 loop {
+                    if cancel.load(Ordering::Relaxed) {
+                        break Err(String::new());
+                    }
                     if started.elapsed() > std::time::Duration::from_secs(300) {
                         break Err(format!(
                             "Pairing timed out.\nCode: {}\nApprove URL: {}",
@@ -2075,19 +2012,35 @@ unsafe fn do_pair_device(hwnd: HWND) {
                         ));
                     }
                     std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+                    if cancel.load(Ordering::Relaxed) {
+                        break Err(String::new());
+                    }
                     if let Some(status) = crate::pairing::poll_pairing(&api_base, &start.poll_token)
                     {
                         match status.status.as_str() {
                             "approved" => {
-                                if let Some(device_token) = status.device_token {
+                                if let Some(device_token) =
+                                    non_empty(status.device_token.unwrap_or_default())
+                                {
+                                    let remote_folder = match approved_remote_folder(
+                                        status.remote_folder.as_deref(),
+                                    ) {
+                                        Ok(folder) => folder,
+                                        Err(err) => break Err(err),
+                                    };
                                     break Ok(PairResult {
+                                        pair_id,
                                         device_token,
                                         webdav_url: status.webdav_url,
                                         username: status.username,
-                                        remote_folder: status.remote_folder,
+                                        password: status.password,
+                                        remote_folder,
+                                        credential_profile_id: status.credential_profile_id,
+                                        credential_version: status.credential_version,
                                     });
                                 }
-                                break Err("Pairing approved but no device token was returned.".to_string());
+                                break Err("Pairing approved but no device token was returned."
+                                    .to_string());
                             }
                             "rejected" => break Err("Pairing was rejected.".to_string()),
                             _ => {}
@@ -2100,7 +2053,10 @@ unsafe fn do_pair_device(hwnd: HWND) {
 
         let (ok, payload): (usize, isize) = match result {
             Ok(pair) => (1, Box::into_raw(Box::new(pair)) as isize),
-            Err(err) => (0, Box::into_raw(Box::new(err)) as isize),
+            Err(message) => (
+                0,
+                Box::into_raw(Box::new(PairError { pair_id, message })) as isize,
+            ),
         };
         unsafe {
             PostMessageW(HWND(raw), WM_APP_PAIR_RESULT, WPARAM(ok), LPARAM(payload)).ok();
@@ -2110,7 +2066,34 @@ unsafe fn do_pair_device(hwnd: HWND) {
 
 unsafe fn do_save(hwnd: HWND) {
     let st = stmut(hwnd);
+    let was_paired = is_paired(&st.config);
+    let locked_webdav_url = st.config.webdav_url.clone();
+    let locked_username = st.config.username.clone();
+    let locked_password = st.password_plain.clone();
+    let locked_remote_folder = st.config.remote_folder.clone();
     read_ctrls(hwnd, st);
+    if was_paired {
+        st.config.webdav_url = locked_webdav_url;
+        st.config.username = locked_username;
+        st.password_plain = locked_password;
+        st.config.remote_folder = locked_remote_folder;
+        let _ = SetWindowTextW(
+            GetDlgItem(hwnd, IDC_URL as i32),
+            &hstring(&st.config.webdav_url),
+        );
+        let _ = SetWindowTextW(
+            GetDlgItem(hwnd, IDC_USERNAME as i32),
+            &hstring(&st.config.username),
+        );
+        let _ = SetWindowTextW(
+            GetDlgItem(hwnd, IDC_PASSWORD as i32),
+            &hstring(&st.password_plain),
+        );
+        let _ = SetWindowTextW(
+            GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
+            &hstring(&st.config.remote_folder),
+        );
+    }
     if st.config.watch_folder.trim().is_empty() {
         msgbox(hwnd, "Origin folder is required.", "Save");
         return;
@@ -2164,19 +2147,16 @@ unsafe fn do_save(hwnd: HWND) {
         )
         .ok();
     });
+    let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
+        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
+    });
     if st.sync_engine.is_some() {
         st.sync_engine = None;
     }
-    match crate::sync::SyncEngine::start(cfg.clone(), pass.clone(), log, activity) {
+    match crate::sync::SyncEngine::start(cfg.clone(), pass.clone(), log, activity, auth_failed) {
         Ok(e) => {
             let st = stmut(hwnd);
             st.sync_engine = Some(e);
-            if !st.server_collapsed {
-                st.server_collapsed = true;
-                update_server_header(hwnd);
-                set_server_controls_visible(hwnd, false);
-                layout_main(hwnd);
-            }
             let msg = Box::new("Settings saved. File watching is active.".to_string());
             PostMessageW(
                 HWND(raw),
@@ -2267,102 +2247,17 @@ unsafe fn do_open_author(hwnd: HWND) {
     );
 }
 
-fn url_encode(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for b in input.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 unsafe fn do_open_logs(hwnd: HWND) {
     let dir = logs::ensure_logs_dir();
     let dir_w = hstring(&dir.to_string_lossy());
     let _ = ShellExecuteW(hwnd, w!("open"), &dir_w, None, None, SW_SHOWNORMAL);
 }
 
-unsafe fn set_server_controls_visible(hwnd: HWND, visible: bool) {
-    let cmd = if visible { SW_SHOW } else { SW_HIDE };
-    for id in [
-        IDC_SERVER_URL_LABEL,
-        IDC_URL,
-        IDC_SERVER_USERNAME_LABEL,
-        IDC_SERVER_PASSWORD_LABEL,
-        IDC_USERNAME,
-        IDC_PASSWORD,
-    ] {
-        ShowWindow(GetDlgItem(hwnd, id as i32), cmd);
-    }
-
-    let show_connect = visible && stmut(hwnd).creds_dirty;
-    ShowWindow(
-        GetDlgItem(hwnd, IDC_CONNECT as i32),
-        if show_connect { SW_SHOW } else { SW_HIDE },
-    );
-}
-
-unsafe fn update_server_header(hwnd: HWND) {
-    let button = if stmut(hwnd).server_collapsed {
-        "Edit"
-    } else {
-        "Done"
-    };
-    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_SERVER_EDIT as i32), &hstring(button));
-}
-
-unsafe fn toggle_server_section(hwnd: HWND) {
-    let st = stmut(hwnd);
-    st.server_collapsed = !st.server_collapsed;
-    st.min_client_h = required_client_height(st);
-    update_server_header(hwnd);
-    set_server_controls_visible(hwnd, !st.server_collapsed);
-    ensure_window_min_height(hwnd);
-    layout_main(hwnd);
-}
-
 fn required_client_height(st: &WndState) -> i32 {
-    let server_h = if st.server_collapsed {
-        0
-    } else {
-        st.server_section_h
-    };
     let folders_h = (LBL_H + 4) + INP_H + GAP + (LBL_H + 4) + INP_H + SECT;
     let activity_h =
         HDR_H + PAD + MIN_ACTIVITY_LIST_H + st.post_list_gap + st.sync_row_h + st.post_sync_sect;
-    M + 4 + HDR_H + PAD + server_h + folders_h + activity_h + st.bottom_bar_h
-}
-
-unsafe fn ensure_window_min_height(hwnd: HWND) {
-    let st = state_ptr(hwnd);
-    if st.is_null() {
-        return;
-    }
-
-    let mut cr = RECT::default();
-    GetClientRect(hwnd, &mut cr).ok();
-    let client_h = cr.bottom - cr.top;
-    if client_h >= (*st).min_client_h {
-        return;
-    }
-
-    let mut wr = RECT::default();
-    GetWindowRect(hwnd, &mut wr).ok();
-    let frame_h = (wr.bottom - wr.top) - client_h;
-    SetWindowPos(
-        hwnd,
-        None,
-        0,
-        0,
-        WIN_W,
-        (*st).min_client_h + frame_h,
-        SWP_NOMOVE | SWP_NOZORDER,
-    )
-    .ok();
+    M + 4 + HDR_H + PAD + folders_h + activity_h + st.bottom_bar_h
 }
 
 unsafe fn layout_main(hwnd: HWND) {
@@ -2378,8 +2273,7 @@ unsafe fn layout_main(hwnd: HWND) {
     let mut y = M + 4;
 
     let status_w = 16i32;
-    let server_edit_x = M + INNER_W - SERVER_EDIT_W;
-    let pair_x = server_edit_x - PAD - PAIR_BTN_W;
+    let pair_x = M + INNER_W - PAIR_BTN_W;
     let server_status_w = 84i32;
     let server_status_x = pair_x - PAD - server_status_w;
     let status_x = server_status_x - status_w - 4;
@@ -2414,16 +2308,6 @@ unsafe fn layout_main(hwnd: HWND) {
     )
     .ok();
     SetWindowPos(
-        GetDlgItem(hwnd, IDC_SERVER_EDIT as i32),
-        None,
-        server_edit_x,
-        y + (HDR_H - SMALL_BTN_H) / 2,
-        SERVER_EDIT_W,
-        SMALL_BTN_H,
-        SWP_NOZORDER,
-    )
-    .ok();
-    SetWindowPos(
         GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32),
         None,
         pair_x,
@@ -2434,88 +2318,6 @@ unsafe fn layout_main(hwnd: HWND) {
     )
     .ok();
     y += HDR_H + PAD;
-
-    let cred_w = (INNER_W - PAD) / 2;
-    if !(*st).server_collapsed {
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_SERVER_URL_LABEL as i32),
-            None,
-            M,
-            y,
-            INNER_W,
-            LBL_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        y += LBL_H + 4;
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_URL as i32),
-            None,
-            M,
-            y,
-            INNER_W,
-            INP_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        if (*st).creds_dirty {
-            SetWindowPos(
-                GetDlgItem(hwnd, IDC_CONNECT as i32),
-                None,
-                M + INNER_W - 54,
-                y,
-                54,
-                INP_H,
-                SWP_NOZORDER,
-            )
-            .ok();
-        }
-        y += INP_H + GAP;
-
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_SERVER_USERNAME_LABEL as i32),
-            None,
-            M,
-            y,
-            cred_w,
-            LBL_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_SERVER_PASSWORD_LABEL as i32),
-            None,
-            M + cred_w + PAD,
-            y,
-            cred_w,
-            LBL_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        y += LBL_H + 4;
-
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_USERNAME as i32),
-            None,
-            M,
-            y,
-            cred_w,
-            INP_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        SetWindowPos(
-            GetDlgItem(hwnd, IDC_PASSWORD as i32),
-            None,
-            M + cred_w + PAD,
-            y,
-            cred_w,
-            INP_H,
-            SWP_NOZORDER,
-        )
-        .ok();
-        y += INP_H + SECT;
-    }
 
     if !(*st).dividers.is_empty() {
         (&mut (*st).dividers)[0] = y - SECT / 2;
@@ -2562,7 +2364,7 @@ unsafe fn layout_main(hwnd: HWND) {
         None,
         M,
         y,
-        112,
+        150,
         LBL_H,
         SWP_NOZORDER,
     )
@@ -2583,17 +2385,7 @@ unsafe fn layout_main(hwnd: HWND) {
         None,
         M,
         y,
-        inp_w,
-        INP_H,
-        SWP_NOZORDER,
-    )
-    .ok();
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_BROWSE_REMOTE as i32),
-        None,
-        browse_x,
-        y,
-        34,
+        INNER_W,
         INP_H,
         SWP_NOZORDER,
     )
@@ -2768,9 +2560,6 @@ unsafe fn layout_main(hwnd: HWND) {
     )
     .ok();
 
-    update_server_header(hwnd);
-    set_server_controls_visible(hwnd, !(*st).server_collapsed);
-
     InvalidateRect(hwnd, None, TRUE);
 }
 
@@ -2927,45 +2716,332 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let connected = wp.0 == 1;
     let st = stmut(hwnd);
     st.connected = connected;
+    let paired = is_paired(&st.config);
     let status_hwnd = GetDlgItem(hwnd, IDC_STATUS_TEXT as i32);
     let status_label_hwnd = GetDlgItem(hwnd, IDC_SERVER_STATUS as i32);
     let conn_hwnd = GetDlgItem(hwnd, IDC_CONNECT as i32);
     if connected {
         set_status(hwnd, "\u{25cf}"); // Just the dot - green = connected
-        let _ = SetWindowTextW(status_label_hwnd, &hstring("Connected"));
-        st.creds_dirty = false;
+        let _ = SetWindowTextW(
+            status_label_hwnd,
+            &hstring(if paired { "Paired" } else { "Connected" }),
+        );
         ShowWindow(conn_hwnd, SW_HIDE);
         ShowWindow(status_hwnd, SW_SHOW);
-        maybe_create_xd_remote_folder(hwnd);
     } else {
         set_status(hwnd, "\u{25cf}"); // Just the dot - red = not connected
-        let _ = SetWindowTextW(status_label_hwnd, &hstring("Offline"));
+        let _ = SetWindowTextW(
+            status_label_hwnd,
+            &hstring(if paired { "Paired" } else { "Offline" }),
+        );
         EnableWindow(conn_hwnd, TRUE);
-        ShowWindow(conn_hwnd, SW_SHOW);
+        ShowWindow(conn_hwnd, SW_HIDE);
         ShowWindow(status_hwnd, SW_SHOW);
     }
     InvalidateRect(status_hwnd, None, TRUE);
     LRESULT(0)
 }
 
-unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    EnableWindow(GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32), TRUE);
+unsafe fn on_app_credential_refresh(hwnd: HWND) -> LRESULT {
+    let st = stmut(hwnd);
+    if st.refresh_in_progress {
+        return LRESULT(0);
+    }
+    st.refresh_in_progress = true;
+    logs::append("Credential refresh requested.");
+    let msg = Box::new("Credential refresh requested.".to_string());
+    PostMessageW(
+        hwnd,
+        WM_APP_LOG,
+        WPARAM(0),
+        LPARAM(Box::into_raw(msg) as isize),
+    )
+    .ok();
+    do_credential_refresh(hwnd);
+    LRESULT(0)
+}
+
+unsafe fn do_credential_refresh(hwnd: HWND) {
+    let st = stmut(hwnd);
+    let cfg = st.config.clone();
+    let raw = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let result = credential_refresh_worker(raw, cfg);
+        let (ok, payload): (usize, isize) = match result {
+            Ok(refresh) => (1, Box::into_raw(Box::new(refresh)) as isize),
+            Err(message) => (
+                0,
+                Box::into_raw(Box::new(RefreshError { message })) as isize,
+            ),
+        };
+        unsafe {
+            PostMessageW(
+                HWND(raw),
+                WM_APP_REFRESH_RESULT,
+                WPARAM(ok),
+                LPARAM(payload),
+            )
+            .ok();
+        }
+    });
+}
+
+fn credential_refresh_worker(
+    raw: isize,
+    cfg: Config,
+) -> std::result::Result<RefreshResult, String> {
+    let device_token = secret::decrypt(&cfg.device_token_enc)
+        .map_err(|e| format!("Could not decrypt device token: {e}"))?;
+    if device_token.trim().is_empty() {
+        return Err("Device is not paired; credential refresh cannot start.".to_string());
+    }
+
+    let start = crate::credential_refresh::start_refresh(&cfg.pair_api_base, &device_token)?;
+    logs::append(&format!(
+        "Credential refresh approval URL: {}",
+        start.approve_url
+    ));
+    let msg = Box::new(format!(
+        "Credential refresh approval URL: {}",
+        start.approve_url
+    ));
+    unsafe {
+        PostMessageW(
+            HWND(raw),
+            WM_APP_LOG,
+            WPARAM(0),
+            LPARAM(Box::into_raw(msg) as isize),
+        )
+        .ok();
+        let _ = ShellExecuteW(
+            HWND(raw),
+            w!("open"),
+            &hstring(&start.approve_url),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        );
+    }
+
+    let sleep_ms = start.poll_interval_ms.clamp(1000, 10_000);
+    let started = std::time::Instant::now();
+    loop {
+        if started.elapsed() > std::time::Duration::from_secs(300) {
+            return Err("Credential refresh timed out.".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+        let status = crate::credential_refresh::poll_refresh(
+            &cfg.pair_api_base,
+            &start.request_token,
+            &device_token,
+        )?;
+        match status.status.as_str() {
+            "approved" => {
+                let Some(password) = status.password else {
+                    return Err(
+                        "Credential refresh approved but no password was returned.".to_string()
+                    );
+                };
+                return Ok(RefreshResult {
+                    webdav_url: status.webdav_url,
+                    username: status.username,
+                    password,
+                    remote_folder: status.remote_folder,
+                    credential_profile_id: status.credential_profile_id,
+                    credential_version: status.credential_version,
+                });
+            }
+            "rejected" => return Err("Credential refresh was rejected.".to_string()),
+            _ => {}
+        }
+    }
+}
+
+unsafe fn on_app_refresh_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let st = stmut(hwnd);
+    st.refresh_in_progress = false;
+
     if wp.0 != 1 {
-        let err = Box::from_raw(lp.0 as *mut String);
+        let err = Box::from_raw(lp.0 as *mut RefreshError);
+        logs::append(&format!("Credential refresh failed: {}", err.message));
+        let msg = Box::new(format!("Credential refresh failed: {}", err.message));
+        PostMessageW(
+            hwnd,
+            WM_APP_LOG,
+            WPARAM(0),
+            LPARAM(Box::into_raw(msg) as isize),
+        )
+        .ok();
+        return LRESULT(0);
+    }
+
+    let refresh = Box::from_raw(lp.0 as *mut RefreshResult);
+    if let Err(message) =
+        validate_refresh_remote_folder(&st.config, refresh.remote_folder.as_deref())
+    {
+        logs::append(&format!("Credential refresh rejected: {message}"));
+        let msg = Box::new(format!("Credential refresh rejected: {message}"));
+        PostMessageW(
+            hwnd,
+            WM_APP_LOG,
+            WPARAM(0),
+            LPARAM(Box::into_raw(msg) as isize),
+        )
+        .ok();
+        msgbox(hwnd, &message, "Credential Refresh");
+        return LRESULT(0);
+    }
+
+    if let Some(webdav_url) = &refresh.webdav_url {
+        st.config.webdav_url = webdav_url.clone();
+        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_URL as i32), &hstring(webdav_url));
+    }
+    if let Some(username) = &refresh.username {
+        st.config.username = username.clone();
+        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_USERNAME as i32), &hstring(username));
+    }
+    match secret::encrypt(&refresh.password) {
+        Ok(enc) => {
+            st.config.password_enc = enc;
+            st.password_plain = refresh.password.clone();
+            let _ = SetWindowTextW(
+                GetDlgItem(hwnd, IDC_PASSWORD as i32),
+                &hstring(&refresh.password),
+            );
+        }
+        Err(e) => {
+            msgbox(
+                hwnd,
+                &format!("Credential refresh succeeded but password encryption failed: {e}"),
+                "Credential Refresh",
+            );
+            return LRESULT(0);
+        }
+    }
+    st.config.credential_profile_id = refresh.credential_profile_id;
+    st.config.credential_version = refresh.credential_version;
+
+    if let Err(e) = crate::config::save(&st.config) {
+        msgbox(
+            hwnd,
+            &format!("Credential refresh succeeded but save failed: {e}"),
+            "Credential Refresh",
+        );
+        return LRESULT(0);
+    }
+
+    restart_sync_after_credential_refresh(hwnd);
+    apply_server_readonly(hwnd);
+    start_connection_check(hwnd);
+    logs::append("Credential refresh applied.");
+    let msg = Box::new("Credential refresh applied.".to_string());
+    PostMessageW(
+        hwnd,
+        WM_APP_LOG,
+        WPARAM(0),
+        LPARAM(Box::into_raw(msg) as isize),
+    )
+    .ok();
+    LRESULT(0)
+}
+
+unsafe fn restart_sync_after_credential_refresh(hwnd: HWND) {
+    let st = stmut(hwnd);
+    if st.sync_engine.is_some() {
+        st.sync_engine = None;
+    }
+    let cfg = st.config.clone();
+    let pass = st.password_plain.clone();
+    let raw = hwnd.0 as isize;
+    let log: crate::sync::LogFn = Arc::new(move |m: String| {
+        logs::append(&m);
+        let s = Box::new(m);
+        unsafe {
+            PostMessageW(
+                HWND(raw),
+                WM_APP_LOG,
+                WPARAM(0),
+                LPARAM(Box::into_raw(s) as isize),
+            )
+            .ok();
+        }
+    });
+    let activity: crate::sync::ActivityFn = Arc::new(move |info| unsafe {
+        PostMessageW(
+            HWND(raw),
+            WM_APP_SYNC_ACTIVITY,
+            WPARAM(info.state as usize),
+            LPARAM(Box::into_raw(Box::new((info.completed, info.total))) as isize),
+        )
+        .ok();
+    });
+    let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
+        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
+    });
+    match crate::sync::SyncEngine::start(cfg, pass, log, activity, auth_failed) {
+        Ok(engine) => stmut(hwnd).sync_engine = Some(engine),
+        Err(err) => {
+            let msg = Box::new(format!(
+                "Sync restart after credential refresh failed: {err}"
+            ));
+            PostMessageW(
+                hwnd,
+                WM_APP_LOG,
+                WPARAM(0),
+                LPARAM(Box::into_raw(msg) as isize),
+            )
+            .ok();
+        }
+    }
+}
+
+unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if wp.0 != 1 {
+        let err = Box::from_raw(lp.0 as *mut PairError);
+        if err.pair_id != stmut(hwnd).pair_id {
+            return LRESULT(0);
+        }
+        EnableWindow(GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32), TRUE);
+        let st = stmut(hwnd);
+        st.pair_cancel = None;
+        let qr_hwnd = st.pair_qr_hwnd;
+        if qr_hwnd.0 != 0 && IsWindow(qr_hwnd).as_bool() {
+            DestroyWindow(qr_hwnd).ok();
+        }
+        if err.message.is_empty() {
+            let _ = SetWindowTextW(
+                GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
+                &hstring("Pair cancelled"),
+            );
+            return LRESULT(0);
+        }
         let _ = SetWindowTextW(
             GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
             &hstring("Pair failed"),
         );
-        msgbox(hwnd, &err, "Pair Device");
+        msgbox(hwnd, &err.message, "Pair Device");
         return LRESULT(0);
     }
 
     let pair = Box::from_raw(lp.0 as *mut PairResult);
+    if pair.pair_id != stmut(hwnd).pair_id {
+        return LRESULT(0);
+    }
+    EnableWindow(GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32), TRUE);
     let st = stmut(hwnd);
+    st.pair_cancel = None;
+    let qr_hwnd = st.pair_qr_hwnd;
+    if qr_hwnd.0 != 0 && IsWindow(qr_hwnd).as_bool() {
+        DestroyWindow(qr_hwnd).ok();
+    }
     match secret::encrypt(&pair.device_token) {
         Ok(enc) => st.config.device_token_enc = enc,
         Err(e) => {
-            msgbox(hwnd, &format!("Device token encrypt error: {e}"), "Pair Device");
+            msgbox(
+                hwnd,
+                &format!("Device token encrypt error: {e}"),
+                "Pair Device",
+            );
             return LRESULT(0);
         }
     }
@@ -2977,23 +3053,76 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         st.config.username = username.clone();
         let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_USERNAME as i32), &hstring(username));
     }
-    if let Some(remote_folder) = &pair.remote_folder {
-        st.config.remote_folder = remote_folder.clone();
-        let _ = SetWindowTextW(
-            GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
-            &hstring(remote_folder),
-        );
+    if let Some(password) = &pair.password {
+        match secret::encrypt(password) {
+            Ok(enc) => {
+                st.config.password_enc = enc;
+                st.password_plain = password.clone();
+                let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_PASSWORD as i32), &hstring(password));
+            }
+            Err(e) => {
+                msgbox(
+                    hwnd,
+                    &format!("WebDAV password encrypt error: {e}"),
+                    "Pair Device",
+                );
+                return LRESULT(0);
+            }
+        }
     }
+    st.config.remote_folder = pair.remote_folder.clone();
+    st.remote_folder_from_xd = false;
+    let _ = SetWindowTextW(
+        GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
+        &hstring(&pair.remote_folder),
+    );
+    st.config.credential_profile_id = pair.credential_profile_id;
+    st.config.credential_version = pair.credential_version;
     if let Err(e) = crate::config::save(&st.config) {
-        msgbox(hwnd, &format!("Pairing succeeded but save failed: {e}"), "Pair Device");
+        msgbox(
+            hwnd,
+            &format!("Pairing succeeded but save failed: {e}"),
+            "Pair Device",
+        );
         return LRESULT(0);
     }
-    st.creds_dirty = true;
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
         &hstring("Paired"),
     );
+    set_status(hwnd, "\u{25cf}");
+    ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
+    InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
+    apply_server_readonly(hwnd);
+    start_connection_check(hwnd);
     msgbox(hwnd, "Device paired and saved.", "Pair Device");
+    LRESULT(0)
+}
+
+unsafe fn cancel_pairing_from_popup(parent: HWND) {
+    if parent.0 == 0 || !IsWindow(parent).as_bool() {
+        return;
+    }
+    let parent_state = state_ptr(parent);
+    if parent_state.is_null() {
+        return;
+    }
+    if let Some(cancel) = &(*parent_state).pair_cancel {
+        cancel.store(true, Ordering::Relaxed);
+        EnableWindow(GetDlgItem(parent, IDC_PAIR_DEVICE as i32), TRUE);
+        let _ = SetWindowTextW(
+            GetDlgItem(parent, IDC_SERVER_STATUS as i32),
+            &hstring("Pair cancelled"),
+        );
+    }
+}
+
+unsafe fn on_app_pair_started(hwnd: HWND, lp: LPARAM) -> LRESULT {
+    let started = Box::from_raw(lp.0 as *mut PairStarted);
+    if started.pair_id != stmut(hwnd).pair_id {
+        return LRESULT(0);
+    }
+    show_pair_qr_window(hwnd, &started.code, &started.approve_url);
     LRESULT(0)
 }
 
@@ -3009,114 +3138,28 @@ unsafe fn on_app_update(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
 }
 
 unsafe fn on_app_remote_folder(hwnd: HWND, lp: LPARAM) -> LRESULT {
-    let remote_folder = Box::from_raw(lp.0 as *mut String);
-    if gettext(hwnd, IDC_REMOTE_FOLDER).is_empty() {
+    let detected = Box::from_raw(lp.0 as *mut crate::xd::DetectedCustomer);
+    if is_paired(&stmut(hwnd).config) {
+        return LRESULT(0);
+    }
+    if stmut(hwnd).config.remote_folder.trim().is_empty() {
         let st = stmut(hwnd);
-        st.config.remote_folder = (*remote_folder).clone();
+        st.config.remote_folder = detected.folder.clone();
+        st.detected_customer = non_empty(detected.customer.clone());
         st.remote_folder_from_xd = true;
-        st.remote_folder_created = false;
+        let display = destination_display_text(
+            &st.config,
+            st.remote_folder_from_xd,
+            st.detected_customer.as_deref(),
+        );
         let _ = SetWindowTextW(
             GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
-            &hstring(&remote_folder),
+            &hstring(&display),
         );
+        update_server_tooltip(hwnd);
         ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
     }
     LRESULT(0)
-}
-
-unsafe fn on_app_dest_ready(hwnd: HWND, wp: WPARAM) -> LRESULT {
-    let created = wp.0 == 1;
-    let st = stmut(hwnd);
-    st.remote_folder_created = created;
-    if created {
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_SHOW);
-        InvalidateRect(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), None, TRUE);
-    } else {
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
-    }
-    LRESULT(0)
-}
-
-unsafe fn browse_remote(hwnd: HWND) {
-    let st = stmut(hwnd);
-    read_ctrls(hwnd, st);
-
-    if st.config.webdav_url.trim().is_empty()
-        || st.config.username.trim().is_empty()
-        || st.password_plain.trim().is_empty()
-    {
-        msgbox(
-            hwnd,
-            "Fill Server URL, Username, and Password first.",
-            "Remote Folder",
-        );
-        return;
-    }
-
-    if let Some(folder) = remote_folder_picker(hwnd, st.config.clone(), st.password_plain.clone()) {
-        st.config.remote_folder = folder.clone();
-        st.remote_folder_from_xd = false;
-        st.remote_folder_created = false;
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
-        let _ = SetWindowTextW(
-            GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
-            &hstring(&folder),
-        );
-    }
-}
-
-unsafe fn maybe_create_xd_remote_folder(hwnd: HWND) {
-    let st = stmut(hwnd);
-    if !st.remote_folder_from_xd || st.remote_folder_created {
-        return;
-    }
-    if st.config.remote_folder.trim().is_empty()
-        || st.config.webdav_url.trim().is_empty()
-        || st.config.username.trim().is_empty()
-        || st.password_plain.trim().is_empty()
-    {
-        return;
-    }
-
-    let cfg = st.config.clone();
-    let pass = st.password_plain.clone();
-    let raw = hwnd.0 as isize;
-    std::thread::spawn(move || {
-        let created = ensure_remote_folder_exists(&cfg, &pass, &cfg.remote_folder).is_ok();
-        unsafe {
-            PostMessageW(
-                HWND(raw),
-                WM_APP_DEST_READY,
-                WPARAM(if created { 1 } else { 0 }),
-                LPARAM(0),
-            )
-            .ok();
-        }
-    });
-}
-
-fn ensure_remote_folder_exists(
-    cfg: &Config,
-    password: &str,
-    folder: &str,
-) -> std::result::Result<(), String> {
-    let folder = normalize_remote_folder(folder);
-    if folder.is_empty() {
-        return Ok(());
-    }
-
-    let mut current = String::new();
-    for part in folder.split('/') {
-        if current.is_empty() {
-            current.push_str(part);
-        } else {
-            current.push('/');
-            current.push_str(part);
-        }
-        let url = join_remote_url(&cfg.webdav_url, &current);
-        webdav::mkcol(cfg, password, &url)?;
-    }
-    Ok(())
 }
 
 unsafe fn on_tray(hwnd: HWND, lp: LPARAM) -> LRESULT {
@@ -3136,12 +3179,90 @@ unsafe fn set_status(hwnd: HWND, t: &str) {
     let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), &hstring(t));
 }
 
+fn is_root_remote_folder(folder: &str) -> bool {
+    let trimmed = folder.trim();
+    trimmed.is_empty() || trimmed == "/" || trimmed == "\\"
+}
+
+fn is_paired(cfg: &Config) -> bool {
+    !cfg.device_token_enc.trim().is_empty()
+}
+
+fn approved_remote_folder(remote_folder: Option<&str>) -> std::result::Result<String, String> {
+    let Some(remote_folder) = remote_folder else {
+        return Err("Pairing approved but no destination folder was returned.".to_string());
+    };
+    let raw = remote_folder.trim();
+    if raw.is_empty() || raw == "/" || raw == "\\" {
+        return Err(
+            "Pairing approved without a customer destination folder. Re-pair after Laravel approves a concrete customer folder."
+                .to_string(),
+        );
+    }
+    if raw.starts_with('/') || raw.starts_with('\\') || raw.contains("..") {
+        return Err(
+            "Pairing approved with an invalid destination folder. Re-pair after Laravel approves a concrete customer folder."
+                .to_string(),
+        );
+    }
+    let normalized = normalize_remote_folder(remote_folder);
+    if normalized.is_empty() || is_root_remote_folder(remote_folder) {
+        return Err(
+            "Pairing approved without a customer destination folder. Re-pair after Laravel approves a concrete customer folder."
+                .to_string(),
+        );
+    }
+    Ok(normalized)
+}
+
+fn validate_refresh_remote_folder(
+    cfg: &Config,
+    remote_folder: Option<&str>,
+) -> std::result::Result<(), String> {
+    let Some(remote_folder) = remote_folder else {
+        return Ok(());
+    };
+    let refreshed = approved_remote_folder(Some(remote_folder))?;
+    let paired = normalize_remote_folder(&cfg.remote_folder);
+    if refreshed != paired {
+        return Err(format!(
+            "Credential refresh returned destination '{refreshed}', but this device is paired to '{paired}'. Re-pair to change customer."
+        ));
+    }
+    Ok(())
+}
+
+unsafe fn apply_server_readonly(hwnd: HWND) {
+    update_server_tooltip(hwnd);
+    stmut(hwnd).min_client_h = required_client_height(stmut(hwnd));
+    layout_main(hwnd);
+}
+
+unsafe fn start_connection_check(hwnd: HWND) {
+    let st = stmut(hwnd);
+    let cfg = st.config.clone();
+    let pass = st.password_plain.clone();
+    if cfg.webdav_url.trim().is_empty() || cfg.username.trim().is_empty() || pass.trim().is_empty()
+    {
+        return;
+    }
+    let raw = hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let ok = webdav::test_connection(&cfg, &pass).is_ok();
+        unsafe {
+            PostMessageW(
+                HWND(raw),
+                WM_APP_CONNECTED,
+                WPARAM(if ok { 1 } else { 0 }),
+                LPARAM(0),
+            )
+            .ok();
+        }
+    });
+}
+
 unsafe fn read_ctrls(hwnd: HWND, st: &mut WndState) {
     st.config.watch_folder = gettext(hwnd, IDC_WATCH_FOLDER);
-    st.config.webdav_url = gettext(hwnd, IDC_URL);
-    st.config.username = gettext(hwnd, IDC_USERNAME);
-    st.password_plain = gettext(hwnd, IDC_PASSWORD);
-    st.config.remote_folder = gettext(hwnd, IDC_REMOTE_FOLDER);
     st.config.start_with_windows = checked(hwnd, IDC_START_WINDOWS);
     st.config.sync_remote_changes = checked(hwnd, IDC_SYNC_REMOTE);
 }
@@ -3272,50 +3393,56 @@ fn validate_webdav_url(url: &str) -> std::result::Result<(), String> {
     }
 }
 
-unsafe fn remote_folder_picker(hwnd: HWND, cfg: Config, password: String) -> Option<String> {
+fn non_empty(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+unsafe fn show_pair_qr_window(parent: HWND, code: &str, approve_url: &str) {
+    let st = stmut(parent);
+    if st.pair_qr_hwnd.0 != 0 && IsWindow(st.pair_qr_hwnd).as_bool() {
+        DestroyWindow(st.pair_qr_hwnd).ok();
+        st.pair_qr_hwnd = HWND(0);
+    }
+
     let hinstance: HINSTANCE = GetModuleHandleW(None).unwrap().into();
     let hfont = mkfont("Segoe UI", 11, FW_NORMAL.0 as i32);
-    let hfont_b = mkfont("Segoe UI", 11, FW_SEMIBOLD.0 as i32);
-    let current = normalize_remote_folder(&cfg.remote_folder);
-
-    let result = Box::new(PickerResult { folder: None });
-    let result_ptr = Box::into_raw(result);
-    let state = Box::new(PickerState {
-        cfg,
-        password,
-        current_folder: current.clone(),
-        selected_folder: Some(current),
-        result: result_ptr,
+    let hfont_b = mkfont("Segoe UI", 12, FW_SEMIBOLD.0 as i32);
+    let state = Box::new(PairQrState {
+        parent,
+        code: code.to_string(),
+        approve_url: approve_url.to_string(),
         hfont,
         hfont_b,
-        busy: false,
     });
 
-    let picker = CreateWindowExW(
+    let hwnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME,
-        PICKER_CLASS_NAME,
-        w!("Select Destination Folder"),
+        PAIR_QR_CLASS_NAME,
+        w!("Pair Backup Sync Tool"),
         WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         100,
         100,
-        hwnd,
+        parent,
         None,
         hinstance,
         Some(Box::into_raw(state) as *const c_void),
     );
 
-    if picker.0 == 0 {
-        let _ = Box::from_raw(result_ptr);
-        return None;
+    if hwnd.0 == 0 {
+        return;
     }
 
     let mut rc = RECT {
         left: 0,
         top: 0,
-        right: PICKER_CLIENT_W,
-        bottom: PICKER_CLIENT_H,
+        right: PAIR_QR_CLIENT_W,
+        bottom: PAIR_QR_CLIENT_H,
     };
     AdjustWindowRectEx(
         &mut rc,
@@ -3325,7 +3452,7 @@ unsafe fn remote_folder_picker(hwnd: HWND, cfg: Config, password: String) -> Opt
     )
     .ok();
     SetWindowPos(
-        picker,
+        hwnd,
         None,
         0,
         0,
@@ -3334,27 +3461,14 @@ unsafe fn remote_folder_picker(hwnd: HWND, cfg: Config, password: String) -> Opt
         SWP_NOMOVE | SWP_NOZORDER,
     )
     .ok();
+    center_child_window(parent, hwnd, PAIR_QR_CLIENT_W, PAIR_QR_CLIENT_H);
 
-    EnableWindow(hwnd, FALSE);
-    ShowWindow(picker, SW_SHOW);
-    UpdateWindow(picker);
-
-    let mut msg = MSG::default();
-    while IsWindow(picker).as_bool() && GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-        if !IsDialogMessageW(picker, &msg).as_bool() {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-
-    EnableWindow(hwnd, TRUE);
-    let _ = SetForegroundWindow(hwnd);
-
-    let result = Box::from_raw(result_ptr);
-    result.folder.clone()
+    stmut(parent).pair_qr_hwnd = hwnd;
+    ShowWindow(hwnd, SW_SHOW);
+    UpdateWindow(hwnd);
 }
 
-unsafe extern "system" fn remote_picker_wnd_proc(
+unsafe extern "system" fn pair_qr_wnd_proc(
     hwnd: HWND,
     msg: u32,
     wp: WPARAM,
@@ -3367,331 +3481,188 @@ unsafe extern "system" fn remote_picker_wnd_proc(
             LRESULT(1)
         }
         WM_CREATE => {
-            picker_on_create(hwnd);
+            pair_qr_on_create(hwnd);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            pair_qr_paint(hwnd, hdc);
+            EndPaint(hwnd, &ps);
             LRESULT(0)
         }
         WM_CTLCOLORSTATIC => {
             let hdc = HDC(wp.0 as isize);
+            let id = GetDlgCtrlID(HWND(lp.0 as isize)) as u16;
             SetBkMode(hdc, TRANSPARENT);
-            SetTextColor(hdc, COLORREF(C_LABEL));
-            LRESULT(GetSysColorBrush(COLOR_WINDOW).0 as isize)
+            SetTextColor(
+                hdc,
+                COLORREF(if id == IDC_PAIR_QR_LINK {
+                    C_BLUE
+                } else {
+                    C_LABEL
+                }),
+            );
+            LRESULT(GetSysColorBrush(COLOR_BTNFACE).0 as isize)
         }
-        WM_COMMAND => picker_on_command(hwnd, wp),
-        WM_APP_PICKER_LOADED => picker_on_loaded(hwnd, lp),
+        WM_COMMAND => {
+            let id = (wp.0 & 0xFFFF) as u16;
+            match id {
+                IDC_PAIR_QR_LINK => {
+                    let st = pair_qr_state(hwnd);
+                    let _ = ShellExecuteW(
+                        hwnd,
+                        w!("open"),
+                        &hstring(&st.approve_url),
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
+                }
+                _ => {}
+            }
+            LRESULT(0)
+        }
         WM_CLOSE => {
             DestroyWindow(hwnd).ok();
             LRESULT(0)
         }
         WM_DESTROY => {
-            picker_on_destroy(hwnd);
+            pair_qr_on_destroy(hwnd);
             LRESULT(0)
         }
         _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
 }
 
-unsafe fn picker_on_create(hwnd: HWND) {
-    let st = picker_state(hwnd);
+unsafe fn pair_qr_on_create(hwnd: HWND) {
+    let st = pair_qr_state(hwnd);
     let hi: HINSTANCE = GetModuleHandleW(None).unwrap().into();
-    let margin = 12;
-    let width = 430 - margin * 2;
-    let path_label_y = 12;
-    let path_y = 32;
-    let list_label_y = 68;
-    let list_y = 88;
-    let list_h = 228;
-    let button_y = 332;
-
-    mkfield_label(
+    let margin = 18;
+    mkstatic_align(
         hwnd,
         hi,
-        "Current folder",
+        0,
+        "Scan to pair with the server",
         margin,
-        path_label_y,
-        width,
-        st.hfont,
-    );
-
-    let path = mkedit_raw(
-        hwnd,
-        hi,
-        IDC_PICKER_PATH,
-        &display_picker_folder(&st.current_folder),
-        margin,
-        path_y,
-        width,
-        st.hfont,
-    );
-    SendMessageW(path, EM_SETREADONLY, WPARAM(1), LPARAM(0));
-
-    mkfield_label(hwnd, hi, "Folders", margin, list_label_y, width, st.hfont);
-
-    mklb(
-        hwnd,
-        hi,
-        IDC_PICKER_LIST,
-        margin,
-        list_y,
-        width,
-        list_h,
-        st.hfont,
-    );
-
-    mkbtn_std(
-        hwnd,
-        hi,
-        IDC_PICKER_UP,
-        "Up",
-        margin,
-        button_y,
-        70,
-        BTN_H,
-        st.hfont,
-    );
-    mkbtn_std(
-        hwnd,
-        hi,
-        IDC_PICKER_CANCEL,
-        "Cancel",
-        margin + width - 170,
-        button_y,
-        80,
-        BTN_H,
-        st.hfont,
-    );
-    mkbtn_std(
-        hwnd,
-        hi,
-        IDC_PICKER_SELECT,
-        "Select",
-        margin + width - 82,
-        button_y,
-        80,
-        BTN_H,
+        336,
+        PAIR_QR_CLIENT_W - margin * 2,
+        24,
         st.hfont_b,
+        SS_CENTER,
     );
-
-    picker_load_current(hwnd);
+    mkstatic_align(
+        hwnd,
+        hi,
+        0,
+        &format!("Code: {}", st.code),
+        margin,
+        364,
+        PAIR_QR_CLIENT_W - margin * 2,
+        20,
+        st.hfont,
+        SS_CENTER,
+    );
+    mkstatic_align(
+        hwnd,
+        hi,
+        IDC_PAIR_QR_LINK,
+        &st.approve_url,
+        margin,
+        392,
+        PAIR_QR_CLIENT_W - margin * 2,
+        20,
+        st.hfont,
+        SS_CENTER | SS_NOTIFY,
+    );
 }
 
-unsafe fn picker_on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
-    let id = (wp.0 & 0xFFFF) as u16;
-    let notif = (wp.0 >> 16) as u16;
+unsafe fn pair_qr_paint(hwnd: HWND, hdc: HDC) {
+    let mut cr = RECT::default();
+    GetClientRect(hwnd, &mut cr).ok();
+    let br_bg = CreateSolidBrush(COLORREF(C_WIN_BG));
+    FillRect(hdc, &cr, br_bg);
+    DeleteObject(br_bg);
 
-    match id {
-        IDC_PICKER_UP => {
-            picker_go_up(hwnd);
-        }
-        IDC_PICKER_SELECT => {
-            picker_commit(hwnd);
-        }
-        IDC_PICKER_CANCEL => {
-            DestroyWindow(hwnd).ok();
-        }
-        IDC_PICKER_LIST => {
-            if notif == LBN_SELCHANGE as u16 {
-                picker_select_current_list_item(hwnd);
-            } else if notif == LBN_DBLCLK as u16 {
-                picker_enter_current_list_item(hwnd);
+    let st = pair_qr_state(hwnd);
+    let qr = match QrCode::encode_text(&st.approve_url, QrCodeEcc::Medium) {
+        Ok(qr) => qr,
+        Err(_) => return,
+    };
+    let modules = qr.size();
+    let qr_px = 260;
+    let scale = (qr_px / modules).max(1);
+    let drawn = modules * scale;
+    let left = (PAIR_QR_CLIENT_W - drawn) / 2;
+    let top = 70;
+
+    let quiet = 8;
+    let br_white = CreateSolidBrush(COLORREF(0x00FFFFFF));
+    let outer = RECT {
+        left: left - quiet,
+        top: top - quiet,
+        right: left + drawn + quiet,
+        bottom: top + drawn + quiet,
+    };
+    FillRect(hdc, &outer, br_white);
+    DeleteObject(br_white);
+
+    let br_black = CreateSolidBrush(COLORREF(0x00000000));
+    for y in 0..modules {
+        for x in 0..modules {
+            if qr.get_module(x, y) {
+                let rc = RECT {
+                    left: left + x * scale,
+                    top: top + y * scale,
+                    right: left + (x + 1) * scale,
+                    bottom: top + (y + 1) * scale,
+                };
+                FillRect(hdc, &rc, br_black);
             }
         }
-        _ => {}
     }
-    LRESULT(0)
+    DeleteObject(br_black);
 }
 
-unsafe fn picker_on_loaded(hwnd: HWND, lp: LPARAM) -> LRESULT {
-    let result = Box::from_raw(lp.0 as *mut PickerLoadResult);
-    let st = picker_state(hwnd);
-    st.busy = false;
-    st.current_folder = result.resolved_folder.clone();
-    if st.selected_folder.is_none() {
-        st.selected_folder = Some(st.current_folder.clone());
-    }
-    let _ = SetWindowTextW(
-        GetDlgItem(hwnd, IDC_PICKER_PATH as i32),
-        &hstring(&display_picker_folder(&st.current_folder)),
-    );
-
-    let list = GetDlgItem(hwnd, IDC_PICKER_LIST as i32);
-    SendMessageW(list, LB_RESETCONTENT, WPARAM(0), LPARAM(0));
-
-    if let Some(error) = &result.error {
-        msgbox(hwnd, error, "Remote Folder");
-        return LRESULT(0);
-    }
-
-    for entry in &result.entries {
-        let label = display_folder_name(entry);
-        let text = hstring(&label);
-        let idx = SendMessageW(
-            list,
-            LB_ADDSTRING,
-            WPARAM(0),
-            LPARAM(text.as_ptr() as isize),
-        )
-        .0;
-        if idx >= 0 {
-            let stored = Box::new(entry.clone());
-            SendMessageW(
-                list,
-                LB_SETITEMDATA,
-                WPARAM(idx as usize),
-                LPARAM(Box::into_raw(stored) as isize),
-            );
-        }
-    }
-
-    EnableWindow(
-        GetDlgItem(hwnd, IDC_PICKER_UP as i32),
-        BOOL(!st.current_folder.is_empty() as i32),
-    );
-    EnableWindow(GetDlgItem(hwnd, IDC_PICKER_SELECT as i32), TRUE);
-    LRESULT(0)
-}
-
-unsafe fn picker_on_destroy(hwnd: HWND) {
-    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState;
+unsafe fn pair_qr_on_destroy(hwnd: HWND) {
+    let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PairQrState;
     if ptr.is_null() {
         return;
     }
-
-    let list = GetDlgItem(hwnd, IDC_PICKER_LIST as i32);
-    let count = SendMessageW(list, LB_GETCOUNT, WPARAM(0), LPARAM(0)).0;
-    for idx in 0..count.max(0) as usize {
-        let data = SendMessageW(list, LB_GETITEMDATA, WPARAM(idx), LPARAM(0)).0;
-        if data >= 0 {
-            let _ = Box::from_raw(data as *mut String);
+    let st = Box::from_raw(ptr);
+    let parent = st.parent;
+    if parent.0 != 0 && IsWindow(parent).as_bool() {
+        cancel_pairing_from_popup(parent);
+        let parent_state = state_ptr(parent);
+        if !parent_state.is_null() && (*parent_state).pair_qr_hwnd == hwnd {
+            (*parent_state).pair_qr_hwnd = HWND(0);
         }
     }
-
-    let st = Box::from_raw(ptr);
     DeleteObject(st.hfont);
     DeleteObject(st.hfont_b);
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 }
 
-unsafe fn picker_load_current(hwnd: HWND) {
-    let st = picker_state(hwnd);
-    if st.busy {
-        return;
-    }
-
-    st.busy = true;
-    let cfg = st.cfg.clone();
-    let password = st.password.clone();
-    let folder = st.current_folder.clone();
-    let raw = hwnd.0 as isize;
-    let _ = SetWindowTextW(
-        GetDlgItem(hwnd, IDC_PICKER_PATH as i32),
-        &hstring(&display_picker_folder(&folder)),
-    );
-    EnableWindow(GetDlgItem(hwnd, IDC_PICKER_SELECT as i32), FALSE);
-
-    std::thread::spawn(move || {
-        let mut resolved_folder = folder.clone();
-        let load = loop {
-            let url = join_remote_url(&cfg.webdav_url, &resolved_folder);
-            match webdav::list_folders(&cfg, &password, &url) {
-                Ok(entries) => {
-                    break PickerLoadResult {
-                        entries: entries
-                            .into_iter()
-                            .map(|href| relative_folder_from_href(&cfg.webdav_url, &href))
-                            .filter(|p| !p.is_empty())
-                            .collect(),
-                        error: None,
-                        resolved_folder: resolved_folder.clone(),
-                    }
-                }
-                Err(error) => {
-                    if resolved_folder.is_empty() {
-                        break PickerLoadResult {
-                            entries: Vec::new(),
-                            error: Some(error),
-                            resolved_folder: String::new(),
-                        };
-                    }
-                    resolved_folder = parent_folder(&resolved_folder);
-                }
-            }
-        };
-
-        let boxed = Box::new(load);
-        unsafe {
-            PostMessageW(
-                HWND(raw),
-                WM_APP_PICKER_LOADED,
-                WPARAM(0),
-                LPARAM(Box::into_raw(boxed) as isize),
-            )
-            .ok();
-        }
-    });
+unsafe fn pair_qr_state(hwnd: HWND) -> &'static mut PairQrState {
+    &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PairQrState)
 }
 
-unsafe fn picker_go_up(hwnd: HWND) {
-    let st = picker_state(hwnd);
-    st.current_folder = parent_folder(&st.current_folder);
-    st.selected_folder = Some(st.current_folder.clone());
-    picker_load_current(hwnd);
-}
-
-unsafe fn picker_select_current_list_item(hwnd: HWND) {
-    let st = picker_state(hwnd);
-    let list = GetDlgItem(hwnd, IDC_PICKER_LIST as i32);
-    let idx = SendMessageW(list, LB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
-    if idx < 0 {
-        return;
-    }
-
-    let idx = idx as usize;
-    if let Some(folder) = picker_list_entries(hwnd).get(idx) {
-        st.selected_folder = Some(folder.clone());
-        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_PICKER_PATH as i32), &hstring(folder));
-    }
-}
-
-unsafe fn picker_enter_current_list_item(hwnd: HWND) {
-    let st = picker_state(hwnd);
-    let list = GetDlgItem(hwnd, IDC_PICKER_LIST as i32);
-    let idx = SendMessageW(list, LB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
-    if idx < 0 {
-        return;
-    }
-
-    let idx = idx as usize;
-    if let Some(folder) = picker_list_entries(hwnd).get(idx) {
-        st.current_folder = folder.clone();
-        st.selected_folder = Some(folder.clone());
-        picker_load_current(hwnd);
-    }
-}
-
-unsafe fn picker_commit(hwnd: HWND) {
-    let st = picker_state(hwnd);
-    let chosen = st
-        .selected_folder
-        .clone()
-        .unwrap_or_else(|| st.current_folder.clone());
-
-    (*st.result).folder = Some(normalize_remote_folder(&chosen));
-    DestroyWindow(hwnd).ok();
-}
-
-unsafe fn picker_state(hwnd: HWND) -> &'static mut PickerState {
-    &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut PickerState)
-}
-
-fn join_remote_url(base: &str, folder: &str) -> String {
-    let mut url = base.trim_end_matches('/').to_string();
-    let folder = normalize_remote_folder(folder);
-    if !folder.is_empty() {
-        url.push('/');
-        url.push_str(&folder);
-    }
-    url.push('/');
-    url
+unsafe fn center_child_window(parent: HWND, child: HWND, child_w: i32, child_h: i32) {
+    let mut pr = RECT::default();
+    GetWindowRect(parent, &mut pr).ok();
+    let x = pr.left + ((pr.right - pr.left) - child_w) / 2;
+    let y = pr.top + ((pr.bottom - pr.top) - child_h) / 2;
+    SetWindowPos(
+        child,
+        None,
+        x.max(0),
+        y.max(0),
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER,
+    )
+    .ok();
 }
 
 fn normalize_remote_folder(folder: &str) -> String {
@@ -3701,60 +3672,6 @@ fn normalize_remote_folder(folder: &str) -> String {
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
         .join("/")
-}
-
-fn parent_folder(folder: &str) -> String {
-    let normalized = normalize_remote_folder(folder);
-    let mut parts: Vec<&str> = normalized.split('/').filter(|s| !s.is_empty()).collect();
-    parts.pop();
-    parts.join("/")
-}
-
-fn relative_folder_from_href(base_url: &str, href: &str) -> String {
-    let href = href.trim();
-    let href = href.trim_end_matches('/');
-    let base = base_url.trim_end_matches('/');
-    let relative = if let Some(rest) = href.strip_prefix(base) {
-        rest
-    } else {
-        href
-    };
-    normalize_remote_folder(relative)
-}
-
-fn display_folder_name(folder: &str) -> String {
-    folder
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or("/")
-        .to_string()
-}
-
-fn display_picker_folder(folder: &str) -> String {
-    let folder = normalize_remote_folder(folder);
-    if folder.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{folder}")
-    }
-}
-
-unsafe fn picker_list_entries(hwnd: HWND) -> Vec<String> {
-    let list = GetDlgItem(hwnd, IDC_PICKER_LIST as i32);
-    let count = SendMessageW(list, LB_GETCOUNT, WPARAM(0), LPARAM(0)).0;
-    let mut entries = Vec::new();
-    if count <= 0 {
-        return entries;
-    }
-
-    for idx in 0..count {
-        let data = SendMessageW(list, LB_GETITEMDATA, WPARAM(idx as usize), LPARAM(0)).0;
-        if data >= 0 {
-            entries.push((*(data as *mut String)).clone());
-        }
-    }
-    entries
 }
 
 unsafe fn apply_startup(cfg: &Config) {

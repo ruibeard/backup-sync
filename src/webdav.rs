@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use std::collections::{HashSet, VecDeque};
+use std::fmt;
 use std::io::Read;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -11,6 +12,61 @@ use std::time::{Duration, UNIX_EPOCH};
 pub struct RemoteFile {
     pub href: String,
     pub is_collection: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum WebDavError {
+    AuthFailed(u16),
+    Http(u16, String),
+    Other(String),
+}
+
+impl WebDavError {
+    pub fn is_auth_failed(&self) -> bool {
+        matches!(self, WebDavError::AuthFailed(_))
+    }
+}
+
+impl fmt::Display for WebDavError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WebDavError::AuthFailed(status) => write!(f, "Server returned HTTP {status}"),
+            WebDavError::Http(status, action) => write!(f, "{action} returned HTTP {status}"),
+            WebDavError::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+impl From<String> for WebDavError {
+    fn from(value: String) -> Self {
+        WebDavError::Other(value)
+    }
+}
+
+impl From<&str> for WebDavError {
+    fn from(value: &str) -> Self {
+        WebDavError::Other(value.to_string())
+    }
+}
+
+impl From<ureq::Error> for WebDavError {
+    fn from(value: ureq::Error) -> Self {
+        match value {
+            ureq::Error::Status(status, _) if status == 401 || status == 403 => {
+                WebDavError::AuthFailed(status)
+            }
+            ureq::Error::Status(status, _) => WebDavError::Http(status, "Request".to_string()),
+            err => WebDavError::Other(err.to_string()),
+        }
+    }
+}
+
+fn http_error(status: u16, action: &str) -> WebDavError {
+    if status == 401 || status == 403 {
+        WebDavError::AuthFailed(status)
+    } else {
+        WebDavError::Http(status, action.to_string())
+    }
 }
 
 fn agent() -> ureq::Agent {
@@ -24,15 +80,17 @@ fn basic_auth(user: &str, pass: &str) -> String {
     format!("Basic {}", B64.encode(format!("{user}:{pass}").as_bytes()))
 }
 
-fn validate_https(url: &str) -> Result<(), String> {
+fn validate_https(url: &str) -> Result<(), WebDavError> {
     if url.trim().to_ascii_lowercase().starts_with("https://") {
         Ok(())
     } else {
-        Err("Server URL must use https://".to_string())
+        Err(WebDavError::Other(
+            "Server URL must use https://".to_string(),
+        ))
     }
 }
 
-pub fn test_connection(cfg: &Config, password: &str) -> Result<(), String> {
+pub fn test_connection(cfg: &Config, password: &str) -> Result<(), WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let url = format!("{}/", cfg.webdav_url.trim_end_matches('/'));
     let auth = basic_auth(&cfg.username, password);
@@ -43,16 +101,20 @@ pub fn test_connection(cfg: &Config, password: &str) -> Result<(), String> {
         .set("Depth", "0")
         .set("Content-Type", "application/xml")
         .send_string(body)
-        .map_err(|e| e.to_string())?;
+        .map_err(WebDavError::from)?;
     let status = resp.status();
     if status < 400 {
         Ok(())
     } else {
-        Err(format!("Server returned HTTP {}", status))
+        Err(http_error(status, "Server"))
     }
 }
 
-pub fn list_folders(cfg: &Config, password: &str, folder_url: &str) -> Result<Vec<String>, String> {
+pub fn list_folders(
+    cfg: &Config,
+    password: &str,
+    folder_url: &str,
+) -> Result<Vec<String>, WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let entries = list_entries(cfg, password, folder_url, 1)?;
     Ok(entries
@@ -66,7 +128,7 @@ pub fn list_entries_recursive(
     cfg: &Config,
     password: &str,
     folder_url: &str,
-) -> Result<Vec<RemoteFile>, String> {
+) -> Result<Vec<RemoteFile>, WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let mut queue = VecDeque::from([folder_url.trim_end_matches('/').to_string() + "/"]);
     let mut seen_dirs = HashSet::new();
@@ -91,17 +153,19 @@ pub fn list_entries_recursive(
     Ok(all)
 }
 
-pub fn get_file(cfg: &Config, password: &str, remote_url: &str) -> Result<Vec<u8>, String> {
+pub fn get_file(cfg: &Config, password: &str, remote_url: &str) -> Result<Vec<u8>, WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     let mut reader = agent()
         .request("GET", remote_url)
         .set("Authorization", &auth)
         .call()
-        .map_err(|e| e.to_string())?
+        .map_err(WebDavError::from)?
         .into_reader();
     let mut data = Vec::new();
-    reader.read_to_end(&mut data).map_err(|e| e.to_string())?;
+    reader
+        .read_to_end(&mut data)
+        .map_err(|e| WebDavError::Other(e.to_string()))?;
     Ok(data)
 }
 
@@ -111,7 +175,7 @@ pub fn put_file<R: Read>(
     remote_url: &str,
     reader: R,
     content_length: u64,
-) -> Result<(), String> {
+) -> Result<(), WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     agent()
@@ -119,12 +183,12 @@ pub fn put_file<R: Read>(
         .set("Authorization", &auth)
         .set("Content-Length", &content_length.to_string())
         .send(reader)
-        .map_err(|e| e.to_string())
+        .map_err(WebDavError::from)
         .and_then(|r| {
             if r.status() < 400 {
                 Ok(())
             } else {
-                Err(format!("PUT returned HTTP {}", r.status()))
+                Err(http_error(r.status(), "PUT"))
             }
         })
 }
@@ -134,7 +198,7 @@ pub fn set_sar_last_modified(
     password: &str,
     remote_url: &str,
     modified_epoch: u64,
-) -> Result<(), String> {
+) -> Result<(), WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     let modified = UNIX_EPOCH + Duration::from_secs(modified_epoch);
@@ -147,21 +211,25 @@ pub fn set_sar_last_modified(
         .set("Authorization", &auth)
         .set("Content-Type", "application/xml")
         .send_string(&body)
-        .map_err(|e| e.to_string())?;
+        .map_err(WebDavError::from)?;
 
     if response.status() >= 400 {
-        return Err(format!("PROPPATCH returned HTTP {}", response.status()));
+        return Err(http_error(response.status(), "PROPPATCH"));
     }
 
-    let xml = response.into_string().map_err(|e| e.to_string())?;
+    let xml = response
+        .into_string()
+        .map_err(|e| WebDavError::Other(e.to_string()))?;
     if xml.contains("<ns1:lastmodified/>") && xml.contains("200 OK") {
         Ok(())
     } else {
-        Err("PROPPATCH did not confirm SAR:lastmodified".to_string())
+        Err(WebDavError::Other(
+            "PROPPATCH did not confirm SAR:lastmodified".to_string(),
+        ))
     }
 }
 
-pub fn mkcol(cfg: &Config, password: &str, remote_url: &str) -> Result<(), String> {
+pub fn mkcol(cfg: &Config, password: &str, remote_url: &str) -> Result<(), WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     match agent()
@@ -174,11 +242,11 @@ pub fn mkcol(cfg: &Config, password: &str, remote_url: &str) -> Result<(), Strin
             if status < 400 || status == 405 {
                 Ok(())
             } else {
-                Err(format!("MKCOL returned HTTP {}", status))
+                Err(http_error(status, "MKCOL"))
             }
         }
         Err(ureq::Error::Status(405, _)) => Ok(()),
-        Err(err) => Err(err.to_string()),
+        Err(err) => Err(WebDavError::from(err)),
     }
 }
 
@@ -195,7 +263,7 @@ fn list_entries(
     password: &str,
     folder_url: &str,
     depth: u32,
-) -> Result<Vec<RemoteFile>, String> {
+) -> Result<Vec<RemoteFile>, WebDavError> {
     validate_https(&cfg.webdav_url)?;
     let auth = basic_auth(&cfg.username, password);
     let body = r#"<?xml version="1.0"?><D:propfind xmlns:D="DAV:"><D:prop><D:resourcetype/><D:displayname/></D:prop></D:propfind>"#;
@@ -205,13 +273,15 @@ fn list_entries(
         .set("Depth", if depth == 0 { "0" } else { "1" })
         .set("Content-Type", "application/xml")
         .send_string(body)
-        .map_err(|e| e.to_string())?;
+        .map_err(WebDavError::from)?;
 
     if response.status() >= 400 {
-        return Err(format!("PROPFIND returned HTTP {}", response.status()));
+        return Err(http_error(response.status(), "PROPFIND"));
     }
 
-    let xml = response.into_string().map_err(|e| e.to_string())?;
+    let xml = response
+        .into_string()
+        .map_err(|e| WebDavError::Other(e.to_string()))?;
     Ok(parse_propfind_entries(&xml, folder_url))
 }
 
@@ -323,12 +393,9 @@ fn sar_http_date(time: std::time::SystemTime) -> String {
     let weekday = ((days + 4).rem_euclid(7)) as usize;
     let weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][weekday];
     let month = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov",
-        "Dec",
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ][(month - 1) as usize];
-    format!(
-        "{weekday}, {day:02} {month} {year:04} {hour:02}:{minute:02}:{second:02} UTC"
-    )
+    format!("{weekday}, {day:02} {month} {year:04} {hour:02}:{minute:02}:{second:02} UTC")
 }
 
 fn civil_from_days(days: i64) -> (i32, u32, u32) {

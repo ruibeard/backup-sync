@@ -17,6 +17,10 @@ pub struct Config {
     pub pair_api_base: String,
     #[serde(default)]
     pub device_token_enc: String,
+    #[serde(default)]
+    pub credential_profile_id: Option<u64>,
+    #[serde(default)]
+    pub credential_version: Option<u64>,
     #[serde(default = "default_true")]
     pub start_with_windows: bool,
     #[serde(default)]
@@ -35,6 +39,8 @@ impl Default for Config {
             remote_folder: String::new(),
             pair_api_base: default_pair_api_base(),
             device_token_enc: String::new(),
+            credential_profile_id: None,
+            credential_version: None,
             start_with_windows: true, // on by default
             sync_remote_changes: false,
             parallel_uploads: default_parallel_uploads(),

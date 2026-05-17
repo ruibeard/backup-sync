@@ -1,107 +1,53 @@
-# Rust App — Agent Instructions & Feature History
+# Agent Instructions
 
-## Build & Launch Rules (MANDATORY)
+`README.md` is the single project spec and handoff document. Do not add separate feature/spec markdown files for implemented behavior; update `README.md` instead.
 
-- **After every code change: rebuild, copy exe to root, relaunch from root.**
-- Kill: `Stop-Process -Name "backupsynctool" -Force -ErrorAction SilentlyContinue`
-- Build: `$env:PATH += ";$env:USERPROFILE\.cargo\bin"; cargo build --release` (from repo root)
-- Copy: `Copy-Item "target\release\backupsynctool.exe" "backupsynctool.exe" -Force` (from repo root)
-- Launch: `Start-Process "backupsynctool.exe"` (from repo root — so it finds `backupsynctool.json` next to it)
-- Always confirm: build succeeded (0 errors) + app is running.
-- **NEVER launch from `target/debug/` or `target/release/` — ALWAYS from repo root.**
+## Build & Launch Rules
 
----
+After every code change:
+
+```powershell
+Stop-Process -Name "backupsynctool" -Force -ErrorAction SilentlyContinue
+$env:PATH += ";$env:USERPROFILE\.cargo\bin"
+cargo build --release
+Copy-Item "target\release\backupsynctool.exe" "backupsynctool.exe" -Force
+Start-Process "backupsynctool.exe"
+```
+
+Always run these commands from the repo root. Never launch from `target/debug` or `target/release`; the app expects `backupsynctool.json` next to the root exe.
+
+Always confirm:
+
+- release build succeeded with 0 errors
+- root `backupsynctool.exe` was copied
+- app is running from the repo root
 
 ## Project Rules
 
-- Rust app lives in the repo root
-- UI: raw Win32 API via `windows-rs` crate — no egui, no nwg
-- No async runtime — blocking `ureq` for HTTP
-- Config stored as JSON next to the `.exe` (`backupsynctool.json`)
-- Password encrypted with Windows DPAPI (`secret.rs`)
-- Tray icon app — closing window hides to tray, double-click reopens
-- Auto-update: checks GitHub releases API directly, downloads, replaces in place, restarts
-- Legacy C++ code has been moved to `../legacy-backup-sync-tool/` (separate repo — read only)
-- `target/` is in `.gitignore`
+- Rust app lives in the repo root.
+- UI is raw Win32 through `windows-rs`; do not add egui, nwg, webview, Electron, or an async runtime.
+- HTTP/WebDAV uses blocking `ureq`.
+- Config is `backupsynctool.json` next to the exe.
+- Password and device token are encrypted with Windows DPAPI in `src/secret.rs`.
+- Tray behavior: closing hides to tray, double-click reopens.
+- Auto-update checks GitHub releases directly and replaces the exe in place.
+- `target/` is ignored and should not be committed.
 
----
+## Release
 
-## How to Release a New Version
+Use `.\build-local.ps1` for normal local build/test cycles. It performs the required stop, release build, root exe copy, root launch, and running-process verification.
 
-1. Bump `version` in `Cargo.toml` (e.g. `"0.2.0"` → `"0.3.0"`)
-2. `cargo build --release` — binary at `target/release/backupsynctool.exe`
-3. Copy `backupsynctool.exe` to repo root and commit
-4. Move the tag: `git tag -f vX.Y.Z && git push origin vX.Y.Z --force`
+Use `.\release.ps1` for an actual public release. It bumps the patch version in `Cargo.toml`, builds release, copies `target\release\backupsynctool.exe` to repo-root `backupsynctool.exe`, commits, creates a new `vX.Y.Z` tag, pushes `main`, pushes the tag, and verifies the remote tag exists.
 
-The app checks GitHub releases API on startup. If a newer version is found, the UPDATE button appears.
+Do not move or force-push an existing release tag during normal releases. Only use `git tag -f` / `git push --force` when explicitly repairing a bad tag or bad release.
 
----
+## Win32 Gotchas
 
-## Architecture
-
-| File | Purpose |
-|---|---|
-| `src/main.rs` | Entry point, registers window class, message loop |
-| `src/ui.rs` | All Win32 UI — window proc, controls, paint, layout |
-| `src/config.rs` | Load/save `backupsynctool.json` next to exe |
-| `src/secret.rs` | DPAPI encrypt/decrypt for password |
-| `src/webdav.rs` | WebDAV HTTP client (ureq, blocking) |
-| `src/sync.rs` | File watcher + upload sync engine |
-| `src/tray.rs` | System tray icon + context menu |
-| `src/updater.rs` | Checks GitHub releases API, downloads, bat-swap-restart |
-| `build.rs` | Embeds icons + manifest into the exe |
-| `assets/` | icon and SVG assets used by the Rust app |
-
----
-
-## UI Design
-
-- Window bg: `#F0F0F0` — Card bg: `#F8F8F8` — Card border: `#DEDEDE`
-- Labels: `#333333` Segoe UI 12pt — Section headers: `#888888` Segoe UI 10pt SemiBold ALL CAPS
-- Input border: `#CCCCCC` (blue `#2B4FA3` on focus)
-- Blue buttons (Connect, Save): `#2B4FA3` white text
-- Grey buttons (Browse, Close, Show): `#E8E8E8` `#333333` text
-- Sections are NOT collapsible — static layout
-- All controls are direct children of `hwnd` (no intermediate panels)
-- Card backgrounds painted in `WM_PAINT` using stored `CardRect` list
-
----
-
-## Known Win32 Gotchas (do not re-learn these)
-
-- `WM_DRAWITEM` only arrives at parent if controls are **direct children of hwnd** — never use intermediate panel windows
-- `WM_CTLCOLORSTATIC` brush must be **pre-allocated** in `WndState` — never create per message (leak)
-- `SS_CENTERIMAGE` (0x0200) = `SS_REALSIZEIMAGE` on Win32 — use manual `y + (h - txt_h) / 2` instead
-- BGR colour order: `#2B4FA3` → COLORREF = `0x00A34F2B`
-- `EnableWindow`/`SetFocus` are in `Win32::UI::Input::KeyboardAndMouse`
-- `SetWindowSubclass`/`DefSubclassProc` are in `Win32::UI::Shell`
-- `Config::Default` must be an explicit `impl` — derived `Default` gives `false` for `bool` fields ignoring serde defaults
-- `ureq` v2 has no `.into_json()` — use `.into_string().ok()? + serde_json::from_str()` instead
-
----
-
-## Feature History (this conversation)
-
-### Implemented
-- Full Rust Win32 rewrite of the C# WPF app
-- Raw Win32 UI matching C# design (cards, colours, fonts)
-- DPAPI password encryption/decryption
-- System tray icon (idle/syncing), double-click to reopen, right-click to exit
-- WebDAV connection test (Connect button)
-- File watcher + upload sync engine
-- Auto-updater: silent background check, UPDATE button appears only when newer version found, bat-file swap-restart
-- Config saved as JSON next to exe
-- `Start with Windows` registry key (HKCU Run)
-- Build embeds icons + manifest
-- Renamed binary from `webdavsync` to `backupsynctool`
-- Removed `appcast.json` — updater now uses GitHub releases API directly
-
-### User-specified defaults & behaviour
-- Default local folder: `C:\XDSoftware\backups` (pre-filled if empty)
-- `Start with Windows` defaults to **ON** (explicit `impl Default` — not derived)
-- App name: **"Backup Sync Tool"** (window title, version label, registry key)
-- Sections are **not collapsible** — user removed toggle logic
-- Fonts: 12pt normal, 10pt SemiBold for headers (not larger)
-- UPDATE button is **hidden on startup**, only shown when update detected
-- Password **Show/Hide toggle button** next to password field
-- Updater uses GitHub releases API: `https://api.github.com/repos/ruibeard/backup-sync-tool/releases/latest`
+- `WM_DRAWITEM` only arrives at the parent for direct child controls; avoid intermediate panel windows for owner-drawn controls.
+- `WM_CTLCOLORSTATIC` brushes must be preallocated in `WndState`; do not create brushes per message.
+- `SS_CENTERIMAGE` (`0x0200`) is `SS_REALSIZEIMAGE` on Win32; use manual text centering instead.
+- BGR colour order: `#2B4FA3` is `COLORREF(0x00A34F2B)`.
+- `EnableWindow` and `SetFocus` are in `Win32::UI::Input::KeyboardAndMouse`.
+- `SetWindowSubclass` and `DefSubclassProc` are in `Win32::UI::Shell`.
+- `Config::Default` must be explicit; derived `Default` ignores serde default functions for bool fields.
+- `ureq` v2 has no `.into_json()`; use `.into_string()` and `serde_json::from_str()`.

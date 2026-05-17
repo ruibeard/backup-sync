@@ -1,80 +1,379 @@
 # Backup Sync Tool
 
-Windows tray app for syncing one local folder to a WebDAV destination.
+Backup Sync Tool is a native Windows tray app that syncs one local backup folder to a WebDAV destination.
 
-It is built as a native Rust Win32 application using `windows-rs`, with blocking HTTP via `ureq`, local config in `backupsynctool.json`, and DPAPI-encrypted password storage.
-
-## Features
-
-- Native Windows tray app
-- Watches one local folder continuously
-- Uploads new and changed files to WebDAV
-- Streams uploads from disk instead of loading entire files into memory first
-- Bounded parallel uploads via `parallel_uploads` in `backupsynctool.json`
-- Optional remote-to-local sync polling
-- Silent GitHub release update check on startup
-- DPAPI password protection
-- Start with Windows support
-- Compact Recent Activity feed
-- Sync progress bar in the main window
-- Animated tray icon plus progress tooltip while syncing
+This README is the single project spec and handoff document. Keep current behavior here instead of adding separate feature/spec markdown files. `AGENTS.md` is reserved for agent/build instructions.
 
 ## Current Stack
 
 - Rust 2021
-- `windows` crate for raw Win32 UI
-- `ureq` for blocking HTTPS/WebDAV
-- `notify` for filesystem watching
-- `serde` + `serde_json` for config
-- Windows DPAPI for password encryption
+- Raw Win32 UI through `windows-rs`
+- Blocking HTTP/WebDAV through `ureq`
+- Filesystem watching through `notify`
+- JSON config through `serde` / `serde_json`
+- Windows DPAPI for local secret encryption
+
+Non-negotiables:
+
+- No egui, nwg, webview, Electron, or async runtime.
+- Config lives next to `backupsynctool.exe` as `backupsynctool.json`.
+- The app must be launched from the repo root during local testing so it reads the root config.
+- Closing the window hides it to tray; tray double-click reopens it.
+- After code changes, build release, copy the exe to repo root, and relaunch from repo root.
+
+## Features
+
+- Native Windows tray app.
+- Watches one local folder recursively.
+- Uploads new and changed files to WebDAV.
+- Streams uploads from disk.
+- Bounded parallel uploads with `parallel_uploads`.
+- Optional remote-to-local sync polling.
+- Local and remote manifest tracking with `.backupsynctool-manifest.json`.
+- Pairing flow with server-approved customer folder.
+- Destination folder lock after pairing.
+- Credential refresh after WebDAV auth failure.
+- DPAPI protection for device token and WebDAV password.
+- Start with Windows support.
+- Compact Recent Activity feed.
+- Sync progress in the main window and tray tooltip.
+- Silent GitHub release check on startup.
 
 ## Project Layout
 
 | Path | Purpose |
-|---|---|
-| `src/main.rs` | Entry point, single-instance handling, startup |
-| `src/ui.rs` | All Win32 UI, controls, layout, progress, recent activity |
-| `src/config.rs` | Load/save `backupsynctool.json` |
-| `src/secret.rs` | DPAPI encrypt/decrypt |
-| `src/webdav.rs` | WebDAV client |
-| `src/sync.rs` | Watcher, startup scan, upload worker pool |
-| `src/tray.rs` | Tray icon and context menu |
-| `src/updater.rs` | GitHub release update check/download/restart |
-| `src/xd.rs` | XD local detection for default paths/folders |
-| `src/logs.rs` | Log file support |
-| `build.rs` | Embeds icons and manifest |
-| `assets/` | ICO/SVG assets used for the app and sync animation |
+| --- | --- |
+| `src/main.rs` | Entry point, module wiring, window/message loop startup |
+| `src/ui.rs` | Main Win32 UI, pairing UX, credential refresh, config locking, event handlers |
+| `src/config.rs` | Load/save `backupsynctool.json` next to the exe |
+| `src/secret.rs` | DPAPI encrypt/decrypt helpers |
+| `src/webdav.rs` | Blocking WebDAV HTTP client |
+| `src/sync.rs` | File watcher, manifest logic, upload/download sync engine |
+| `src/tray.rs` | System tray icon and context menu |
+| `src/updater.rs` | GitHub release check, download, swap, restart |
+| `src/pairing.rs` | Pair start/status API client |
+| `src/credential_refresh.rs` | Credential refresh API client |
+| `src/xd.rs` | XD local folder/licence detection |
+| `src/logs.rs` | Local log file append/open support |
+| `build.rs` | Embeds icons and manifest into the exe |
+| `assets/` | App, tray, update, and sync icons |
+
+## Architecture
+
+```mermaid
+flowchart TD
+    UI["src/ui.rs\nWin32 UI, pairing, save, refresh"]
+    Config["src/config.rs\nbackupsynctool.json"]
+    Secret["src/secret.rs\nDPAPI"]
+    XD["src/xd.rs\nXD licence detection"]
+    Pairing["src/pairing.rs\npair API"]
+    Refresh["src/credential_refresh.rs\ncredential refresh API"]
+    Sync["src/sync.rs\nwatcher + manifest + transfers"]
+    WebDAV["src/webdav.rs\nWebDAV client"]
+    Tray["src/tray.rs\ntray icon/menu"]
+    Updater["src/updater.rs\nGitHub releases"]
+    Logs["src/logs.rs\nactivity logs"]
+
+    UI <--> Config
+    UI <--> Secret
+    UI --> XD
+    UI --> Pairing
+    UI --> Refresh
+    UI --> Sync
+    UI --> Tray
+    UI --> Updater
+    UI --> Logs
+    Sync --> WebDAV
+    Sync --> Logs
+```
 
 ## Configuration
 
-Config is stored next to the exe as `backupsynctool.json`.
-
-Example:
+Example `backupsynctool.json`:
 
 ```json
 {
   "watch_folder": "C:\\XDSoftware\\backups",
-  "webdav_url": "https://example.com",
+  "webdav_url": "https://example.com/webdav/XD-BACKUPS",
   "username": "user",
   "password_enc": "...",
-  "remote_folder": "XDPT.59655_Palmeira-Minimercado",
+  "remote_folder": "XDPT.59655-Palmeira-Minimercado",
+  "pair_api_base": "https://box.rui.cam",
+  "device_token_enc": "...",
+  "credential_profile_id": 10,
+  "credential_version": 1,
   "start_with_windows": true,
-  "sync_remote_changes": true,
+  "sync_remote_changes": false,
   "parallel_uploads": 10
 }
 ```
 
-Notes:
+Important fields:
 
-- `password_enc` is DPAPI-encrypted, not plain text
-- `parallel_uploads` defaults to `10`
-- config must live next to `backupsynctool.exe`
+| Field | Meaning |
+| --- | --- |
+| `watch_folder` | Local folder watched recursively |
+| `webdav_url` | Server/WebDAV root URL |
+| `username` | WebDAV username |
+| `password_enc` | DPAPI-encrypted WebDAV password |
+| `remote_folder` | Approved server-owned customer folder after pairing |
+| `pair_api_base` | Pairing/credential API base, default `https://box.rui.cam` |
+| `device_token_enc` | DPAPI-encrypted device token; presence means paired |
+| `credential_profile_id` | Optional server credential profile id |
+| `credential_version` | Optional server credential version |
+| `start_with_windows` | Defaults to `true` |
+| `sync_remote_changes` | Enables remote manifest polling/downloads |
+| `parallel_uploads` | Upload worker count, defaults to `10` |
+
+Secrets must never be written as plaintext.
+
+## XD Detection
+
+XD detection is optional. If XD is not present, pairing still works and the server/admin chooses the customer.
+
+Relevant local paths:
+
+```text
+C:\XDSoftware\backups
+C:\XDSoftware\bin\xd\XDPeople.NET.dll
+C:\XDSoftware\cfg\xd.lic
+```
+
+Current app behavior:
+
+- `src/xd.rs` uses PowerShell directly.
+- It loads `C:\XDSoftware\bin\xd\XDPeople.NET.dll`.
+- It calls `XDPeople.Utils.XDLicence.LoadToPreview("C:\XDSoftware\cfg\xd.lic")`.
+- It reads the licence number and commercial name.
+
+Detected values:
+
+| Rust helper | Source | Example |
+| --- | --- | --- |
+| `default_watch_folder()` | Existing `C:\XDSoftware\backups` directory | `C:\XDSoftware\backups` |
+| `detect_customer_name()` | `$lic.ComercialName` | `Palmeira Minimercado` |
+| `detect_default_remote_folder()` | `$lic.Number` + slugified `$lic.ComercialName` | `XDPT.59655-Palmeira-Minimercado` |
+
+Before pairing, the app may prefill an empty destination field from XD detection. That value is only a hint. Pairing must not trust the editable destination textbox.
+
+## Pairing And Folder Lock
+
+Pairing lets the server approve the final customer folder and return credentials.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant App as Windows App
+    participant XD as XD Licence
+    participant API as Server API
+    participant Admin as Admin Approval
+    participant WebDAV
+
+    User->>App: Click Pair
+    App->>XD: Detect local hints
+    XD-->>App: detected_folder, detected_customer
+    App->>API: POST /api/pair/start
+    API-->>App: code, approve_url, poll_token
+    App-->>User: Show QR/code popup
+    Admin->>API: Approve customer/folder
+    loop Poll until approved/rejected/cancelled/timeout
+        App->>API: GET /api/pair/status/{poll_token}
+        API-->>App: pending/approved/rejected
+    end
+    API-->>App: device_token, credentials, approved remote_folder
+    App->>App: Validate and save approved config
+    App->>App: Lock server and destination fields
+    App->>WebDAV: Sync using approved folder only
+```
+
+Pair start request:
+
+```json
+{
+  "machine_name": "RECEPTION-PC",
+  "windows_user": "office",
+  "app_version": "2026.0.3",
+  "detected_folder": "XDPT.59655-Palmeira-Minimercado",
+  "detected_customer": "Palmeira Minimercado"
+}
+```
+
+Rules:
+
+- `detected_folder` and `detected_customer` are hints only.
+- Both come from XD licence detection in `src/xd.rs`.
+- They must not come from the editable destination textbox.
+- If XD detection fails, those fields are omitted.
+- The approved `remote_folder` must come back from the server.
+
+Approved response shape:
+
+```json
+{
+  "status": "approved",
+  "device_token": "...",
+  "webdav_url": "https://example.com/webdav/XD-BACKUPS",
+  "username": "...",
+  "password": "...",
+  "remote_folder": "XDPT.59655-Palmeira-Minimercado",
+  "credential_profile_id": 10,
+  "credential_version": 1
+}
+```
+
+The app rejects approved pairing if:
+
+- `device_token` is missing or empty.
+- `remote_folder` is missing.
+- `remote_folder` is empty.
+- `remote_folder` is `/` or `\`.
+- `remote_folder` starts with `/` or `\`.
+- `remote_folder` contains `..`.
+
+Once paired:
+
+- `device_token_enc` is present.
+- Server URL, username, password, and destination folder become read-only.
+- Destination browse is hidden/disabled.
+- `Save` preserves the stored approved folder even if UI text changes.
+- Background XD detection cannot overwrite the approved folder.
+- Remote picker navigation cannot change the approved folder.
+
+The only supported way to change customer folder is to re-pair through the server.
+
+## Sync Behavior
+
+The sync engine watches `watch_folder` recursively using `notify`.
+
+Main behavior:
+
+- Startup loads local manifest from `.backupsynctool-manifest.json`.
+- Startup fetches remote manifest from WebDAV.
+- Local creates/modifies are queued and uploaded after a short debounce.
+- Uploads are bounded by `parallel_uploads`.
+- Manifest is uploaded after batches.
+- Optional remote-to-local sync polls remote manifest every 60 seconds.
+- Manifest file itself is ignored by scanning and event handling.
+
+Remote URL construction:
+
+```text
+webdav_url / remote_folder / relative_file_path
+```
+
+Example:
+
+```text
+webdav_url:     https://example.com/webdav/XD-BACKUPS
+remote_folder: XDPT.59655-Palmeira-Minimercado
+relative path: 2026/backup.zip
+upload URL:    https://example.com/webdav/XD-BACKUPS/XDPT.59655-Palmeira-Minimercado/2026/backup.zip
+```
+
+The sync engine must always use the stored approved `remote_folder` for paired devices.
+
+## Credential Refresh
+
+Credential refresh starts only after WebDAV authentication failure and only for paired devices.
+
+```mermaid
+sequenceDiagram
+    participant Sync
+    participant UI as App UI Thread
+    participant API as Server API
+    participant WebDAV
+
+    Sync->>WebDAV: Request with stored credentials
+    WebDAV-->>Sync: Auth failed
+    Sync->>UI: Request credential refresh
+    UI->>API: POST /api/device/credential-refresh/start
+    API-->>UI: request_token, approve_url, poll_interval_ms
+    loop Poll while pending
+        UI->>API: GET /api/device/credential-refresh/status/{request_token}
+        API-->>UI: pending/approved/rejected
+    end
+    UI->>UI: Validate remote_folder if returned
+    UI->>UI: DPAPI-save new password
+    UI->>Sync: Restart sync engine
+```
+
+Refresh start:
+
+```text
+POST /api/device/credential-refresh/start
+Authorization: Bearer <device_token>
+```
+
+Refresh poll:
+
+```text
+GET /api/device/credential-refresh/status/{request_token}
+Authorization: Bearer <device_token>
+```
+
+Refresh rules:
+
+- Approved refresh must include `password`.
+- `remote_folder` may be omitted.
+- If `remote_folder` is returned, it must match the already paired folder after normalization.
+- Refresh must never change the approved folder.
+- Accepted refresh saves new credentials and restarts sync before the next upload.
+
+## UI Behavior
+
+The UI is raw Win32. Controls are direct children of the main window; do not add panel child windows for owner-drawn controls.
+
+Implemented behavior:
+
+- Closing hides to tray.
+- Tray double-click reopens.
+- Tray menu can open app/logs or exit.
+- Pair button starts QR/code flow.
+- UPDATE button is hidden until a newer GitHub release is found.
+- Server credentials are not editable in the UI; `backupsynctool.json` is the source for stored WebDAV settings.
+- Server status keeps the connected/paired/offline indicator; hovering it shows the configured server URL and approved destination folder.
+- Destination folder is server-owned. Before pairing, the UI may show the XD-detected customer name/licence slug as a hint, but Laravel approval returns the final folder.
+- Password field has show/hide behavior.
+- Recent Activity displays compact sync/log messages.
+- Sync progress is shown in the window and tray tooltip.
+
+Visual rules:
+
+- Window background: `#F0F0F0`
+- Card background: `#F8F8F8`
+- Card border: `#DEDEDE`
+- Labels: `#333333`, Segoe UI 12pt
+- Section headers: `#888888`, Segoe UI 10pt SemiBold, all caps
+- Blue action buttons: `#2B4FA3` with white text
+- Grey buttons: `#E8E8E8` with `#333333` text
+
+## Auto Update And Release
+
+On startup the app checks:
+
+```text
+https://api.github.com/repos/ruibeard/backup-sync-tool/releases/latest
+```
+
+If a newer version is available:
+
+- UPDATE button appears.
+- User-triggered update downloads the release exe.
+- A batch swapper replaces the running exe and restarts the app.
+
+Release flow:
+
+1. For local build/test cycles, use `.\build-local.ps1`.
+2. For an actual public release, prefer `.\release.ps1`.
+3. `release.ps1` bumps the patch version in `Cargo.toml`, builds release, copies `target\release\backupsynctool.exe` to repo-root `backupsynctool.exe`, commits, creates a new `vX.Y.Z` tag, pushes `main`, pushes the tag, and verifies the remote tag exists.
+4. Do not move or force-push an existing release tag during normal releases. Only use `git tag -f` / `git push --force` when explicitly repairing a bad tag or bad release.
 
 ## Build
 
 From repo root:
 
 ```powershell
+Stop-Process -Name "backupsynctool" -Force -ErrorAction SilentlyContinue
 $env:PATH += ";$env:USERPROFILE\.cargo\bin"
 cargo build --release
 Copy-Item "target\release\backupsynctool.exe" "backupsynctool.exe" -Force
@@ -83,42 +382,20 @@ Start-Process "backupsynctool.exe"
 
 Always launch from the repo root so the app finds `backupsynctool.json` next to the exe.
 
-## Runtime Behavior
+## Security Boundary
 
-- Closing the window hides to tray
-- Double-clicking the tray icon reopens the window
-- Startup performs a background check of remote files and local files
-- Recent Activity shows high-level checking steps plus compact transfer entries
-- Sync progress is shown both in the main window and in the tray tooltip
+Desktop folder locking prevents normal users from accidentally selecting the wrong customer folder. It is not hard tenant isolation against a modified client if WebDAV credentials can write to a broad shared root.
 
-## XD Defaults
+Hard isolation requires server-issued customer-scoped WebDAV credentials where each credential can only access its approved customer folder.
 
-If XD is installed locally, the app can prefill:
+## Future-Agent Checklist
 
-- local watch folder: `C:\XDSoftware\backups`
-- remote folder: derived from XD licence data via `src/xd.rs`
+Before changing pairing, sync, config, or credential handling:
 
-The current app uses a direct PowerShell + DLL inspection flow through `src/xd.rs`.
-
-## Auto Update
-
-The app checks:
-
-`https://api.github.com/repos/ruibeard/backup-sync-tool/releases/latest`
-
-If a newer version is found, the UPDATE button appears. Download/install then replaces the exe in place and restarts the app.
-
-## Assets
-
-The exe currently embeds only the icons referenced by `build.rs`:
-
-- `assets/app-idle.ico`
-- `assets/syncing.ico`
-- `assets/complete.ico`
-- `assets/syncing1.ico` through `assets/syncing6.ico`
-
-SVG files are kept as editable source assets.
-
-## Legacy Code
-
-`legacy-cpp-code/` is kept only as historical/reference material. The active app is the Rust implementation in the repo root.
+- Check whether the device is paired using `device_token_enc`.
+- Do not trust editable UI fields for server-owned values.
+- Do not allow `Save` to overwrite paired `remote_folder`.
+- Do not make credential refresh change customer folder.
+- Keep DPAPI encryption for token/password.
+- Keep sync URLs rooted at stored `webdav_url` + stored `remote_folder`.
+- Rebuild release, copy exe to root, relaunch from root after code changes.

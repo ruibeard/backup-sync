@@ -39,6 +39,9 @@ notify = { version = "6", default-features = false }
 # Base64 for DPAPI blob serialisation
 base64 = "0.22"
 
+# Local QR code generation for device pairing
+qrcodegen = "1"
+
 [profile.release]
 opt-level = "z"       # optimise for size
 lto = true            # link-time optimisation

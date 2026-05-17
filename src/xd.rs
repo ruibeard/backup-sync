@@ -8,12 +8,18 @@ const XD_DLL_PATH: &str = r"C:\XDSoftware\bin\xd\XDPeople.NET.dll";
 const XD_LICENSE_PATH: &str = r"C:\XDSoftware\cfg\xd.lic";
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+#[derive(Debug, Clone)]
+pub struct DetectedCustomer {
+    pub folder: String,
+    pub customer: String,
+}
+
 pub fn default_watch_folder() -> Option<String> {
     let path = Path::new(DEFAULT_WATCH_FOLDER);
     path.is_dir().then(|| path.display().to_string())
 }
 
-pub fn detect_default_remote_folder() -> Option<String> {
+pub fn detect_customer_hint() -> Option<DetectedCustomer> {
     if !Path::new(XD_ROOT).is_dir()
         || !Path::new(XD_DLL_PATH).is_file()
         || !Path::new(XD_LICENSE_PATH).is_file()
@@ -27,8 +33,10 @@ pub fn detect_default_remote_folder() -> Option<String> {
     }
 
     let value = String::from_utf8(output.stdout).ok()?;
-    let trimmed = value.trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
+    let mut lines = value.lines().map(str::trim).filter(|line| !line.is_empty());
+    let folder = lines.next()?.to_string();
+    let customer = lines.next().unwrap_or("").to_string();
+    (!folder.is_empty()).then_some(DetectedCustomer { folder, customer })
 }
 
 fn powershell_detection_command() -> Command {
@@ -63,7 +71,8 @@ fn powershell_detection_command() -> Command {
             "  if (-not $previousDash) {{ $chars.Add('-'); $previousDash = $true }}",
             "}};",
             "$slug = (-join $chars.ToArray()).Trim('-');",
-            "if ([string]::IsNullOrWhiteSpace($slug)) {{ Write-Output $number }} else {{ Write-Output ($number + '-' + $slug) }}"
+            "if ([string]::IsNullOrWhiteSpace($slug)) {{ Write-Output $number }} else {{ Write-Output ($number + '-' + $slug) }};",
+            "Write-Output $name"
         ),
         XD_DLL_PATH, XD_LICENSE_PATH, XD_DLL_PATH, XD_LICENSE_PATH
     );

@@ -2,9 +2,13 @@
   "watch_folder": "C:\\XDSoftware\\backups",
   "webdav_url": "https://u561272-sub1.your-storagebox.de",
   "username": "u561272-sub1",
-  "password_enc": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAKAtvQrn/30qyyTANxKS/4gAAAAAWAAAAdwBlAGIAZABhAHYAcwB5AG4AYwAAABBmAAAAAQAAIAAAAFOqiNz2goQx/FEtN4Qxywpy/zvdPJg//AeOal7ny/+WAAAAAA6AAAAAAgAAIAAAAMcFp3J88rFCp/8bxdxPepcKortY9PnYx6dYAdZYeHjWIAAAAEsOv/7cWax0ZKCjy/pLlYg8yETpOld4j2jLPBAJ7wTZQAAAAPAixMtVUr0fAw5shSBIncbksD4UBrfd9FzqwNWhqyzOuQm8ahf8G20zJGfzco4HWgsYQWz+LcEQtc07YFatR/0=",
-  "remote_folder": "XDPT.59655_Palmeira-Minimercado",
+  "password_enc": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAKAtvQrn/30qyyTANxKS/4gAAAAAWAAAAdwBlAGIAZABhAHYAcwB5AG4AYwAAABBmAAAAAQAAIAAAAKUZ3dQYZo1W9I/yBgJxC7sHPeiMdbAK07T+9Rg1kCCyAAAAAA6AAAAAAgAAIAAAAEksPEk2k7JuLDQwb5ffEUeLz8Bbdzm/RuG1PSdMF7bUIAAAAOyO2zxTdBvlDNIcdYWrtudZuE1hFlDcFGxzHetgGPKhQAAAACB6q38KERjDlfYxUL+vKF5OdhicV8+gwVPUH1LUifjv+7vbsxt1gU+G8vZIPxLw6L1ZyB8NJh8v9yN1cFKaOEU=",
+  "remote_folder": "XDPT.59655-Palmeira-Minimercado",
+  "pair_api_base": "https://box.rui.cam",
+  "device_token_enc": "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAKAtvQrn/30qyyTANxKS/4gAAAAAWAAAAdwBlAGIAZABhAHYAcwB5AG4AYwAAABBmAAAAAQAAIAAAAP9MztQHOB0rQVvjPTW/KCUDLrfOzfNgyJJAPcpdXdPgAAAAAA6AAAAAAgAAIAAAANhH/N02lpM2+9mEfTxLePGa7vBYb6Df1HJELA3kV48iUAAAAOg460D9a1LjHSMDuJF++s1b25/yJI4C0jhPQ0/iYDd7opbU6/9M+2nBGVVQwig+KKKgS0hnPVNoUZBzi7bid/PrjJRxwr7TgfDtt8mGxWa3QAAAAN51Et/vuuLCjTeeFr5r7xGy8xcXUdtMHn9TOG46UsxHHGn9bPV3cJnTonWA1MA/ab0WcOudA5SMhnZUaEuMJyk=",
+  "credential_profile_id": null,
+  "credential_version": 1,
   "start_with_windows": true,
-  "sync_remote_changes": true,
-  "parallel_uploads": 100
+  "sync_remote_changes": false,
+  "parallel_uploads": 10
 }
