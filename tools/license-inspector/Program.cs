@@ -131,14 +131,11 @@ foreach (var key in preferredOrder)
     }
 }
 
-if (options.All)
+Console.WriteLine($"RemoteFolder: {remoteFolder}");
+var remaining = values.Keys.Except(preferredOrder, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal);
+foreach (var key in remaining)
 {
-    Console.WriteLine($"RemoteFolder: {remoteFolder}");
-    var remaining = values.Keys.Except(preferredOrder, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal);
-    foreach (var key in remaining)
-    {
-        Console.WriteLine($"{key}: {values[key]}");
-    }
+    Console.WriteLine($"{key}: {values[key]}");
 }
 
 return 0;

@@ -1,43 +1,15 @@
-# Build directories
-/build/
-/out/
-/legacy-cpp-code/build/
-/bin/
-bin/
-obj/
-.DS_Store
-
 # Rust build output
 /target/
 
-# CMake-generated files
-/CMakeCache.txt
-/cmake_install.cmake
-/compile_commands.json
-/Makefile
-/Testing/
-/install_manifest.txt
-
-# Visual Studio / MSVC
-/.vs/
-*.sln
-*.vcxproj
-*.vcxproj.filters
-*.vcxproj.user
-*.VC.db
-*.VC.opendb
-*.obj
+# .NET build output
+bin/
+obj/
 *.pdb
-*.ilk
-*.idb
-*.ipch
-*.tlog
-*.lastbuildstate
 
 # IDE settings
 /.idea/
-!/.idea/cmake.xml
-#
+.DS_Store
+
 # App runtime files
 /config.json
 /logs/
