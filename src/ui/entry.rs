@@ -13,7 +13,7 @@ pub fn run(hinstance: HINSTANCE, start_minimized: bool) {
             lpfnWndProc: Some(wnd_proc),
             hInstance: hinstance,
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: HBRUSH(0isize),
+            hbrBackground: HBRUSH(std::ptr::null_mut()),
             lpszClassName: CLASS_NAME,
             hIcon: LoadIconW(hinstance, w!("APP_ICON_IDLE"))
                 .unwrap_or(LoadIconW(None, IDI_APPLICATION).unwrap_or_default()),
@@ -85,8 +85,8 @@ unsafe extern "system" fn wnd_proc(
 
         // Static / label controls
         WM_CTLCOLORSTATIC => {
-            let hdc = HDC(wparam.0 as isize);
-            let hctl = HWND(lparam.0);
+            let hdc = HDC(wparam.0 as *mut _);
+            let hctl = HWND(lparam.0 as *mut _);
             let id = GetDlgCtrlID(hctl) as u16;
             SetBkMode(hdc, TRANSPARENT);
             let st = state_ptr(hwnd);
@@ -117,7 +117,7 @@ unsafe extern "system" fn wnd_proc(
         }
 
         WM_CTLCOLOREDIT => {
-            let hdc = HDC(wparam.0 as isize);
+            let hdc = HDC(wparam.0 as *mut _);
             SetBkColor(hdc, COLORREF(C_INPUT_BG));
             SetTextColor(hdc, COLORREF(C_LABEL));
             let st = state_ptr(hwnd);
@@ -128,7 +128,7 @@ unsafe extern "system" fn wnd_proc(
         }
 
         WM_CTLCOLORBTN => {
-            let hdc = HDC(wparam.0 as isize);
+            let hdc = HDC(wparam.0 as *mut _);
             SetBkMode(hdc, TRANSPARENT);
             let st = state_ptr(hwnd);
             if st.is_null() {

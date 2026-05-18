@@ -194,18 +194,18 @@ unsafe fn load_stock_icon(icon_id: SHSTOCKICONID, link_overlay: bool) -> HICON {
         flags |= SHGSI_LINKOVERLAY;
     }
     if SHGetStockIconInfo(icon_id, flags, &mut info).is_err() {
-        return HICON(0);
+        return HICON(std::ptr::null_mut());
     }
     info.hIcon
 }
 
 unsafe fn set_button_icon(hwnd: HWND, icon: HICON) {
-    if icon.0 != 0 {
+    if !icon.0.is_null() {
         SendMessageW(
             hwnd,
             BM_SETIMAGE,
             WPARAM(IMAGE_ICON as usize),
-            LPARAM(icon.0),
+            LPARAM(icon.0 as isize),
         );
     }
 }
@@ -219,12 +219,12 @@ unsafe fn set_status_icon(hwnd: HWND, color: u32) {
     } else {
         st.status_error_icon
     };
-    if icon.0 != 0 {
+    if !icon.0.is_null() {
         SendMessageW(
             GetDlgItem(hwnd, IDC_STATUS_TEXT as i32),
             STM_SETIMAGE,
             WPARAM(IMAGE_ICON as usize),
-            LPARAM(icon.0),
+            LPARAM(icon.0 as isize),
         );
     }
 }
@@ -234,8 +234,8 @@ unsafe fn load_imageres_icon(index: i32) -> HICON {
         .map(|root| format!("{root}\\System32\\imageres.dll"))
         .unwrap_or_else(|_| "C:\\Windows\\System32\\imageres.dll".to_string());
     let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut large = [HICON(0)];
-    let mut small = [HICON(0)];
+    let mut large = [HICON(std::ptr::null_mut())];
+    let mut small = [HICON(std::ptr::null_mut())];
     let count = ExtractIconExW(
         PCWSTR(path_w.as_ptr()),
         index,
@@ -244,12 +244,12 @@ unsafe fn load_imageres_icon(index: i32) -> HICON {
         1,
     );
     if count > 0 {
-        if small[0].0 != 0 {
+        if !small[0].0.is_null() {
             return small[0];
         }
         return large[0];
     }
-    HICON(0)
+    HICON(std::ptr::null_mut())
 }
 unsafe fn msgbox(hwnd: HWND, text: &str, title: &str) {
     MessageBoxW(

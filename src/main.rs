@@ -26,7 +26,7 @@ fn main() {
     unsafe {
         if OpenMutexW(MUTEX_ALL_ACCESS, false, w!("BackupSyncToolSingleton")).is_ok() {
             let hwnd = FindWindowW(ui::CLASS_NAME, None);
-            if hwnd.0 != 0 && !start_minimized {
+            if !hwnd.0.is_null() && !start_minimized {
                 ShowWindow(hwnd, SW_RESTORE);
                 let _ = SetForegroundWindow(hwnd);
             }

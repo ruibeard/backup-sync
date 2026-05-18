@@ -35,7 +35,7 @@ ureq = { version = "2", features = ["tls"] }
 quick-xml = "0.31"
 
 # File watching
-notify = { version = "6", default-features = false }
+notify = { version = "6" }
 
 # Base64 for DPAPI blob serialisation
 base64 = "0.22"

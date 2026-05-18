@@ -131,11 +131,11 @@ unsafe fn do_connect(hwnd: HWND) {
         &hstring("Connecting"),
     );
     ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
-    let raw = hwnd.0;
+    let raw = hwnd.0 as isize;
     std::thread::spawn(move || {
         let ok = webdav::test_connection(&cfg, &pass).is_ok();
         PostMessageW(
-            HWND(raw),
+            HWND(raw as *mut _),
             WM_APP_CONNECTED,
             WPARAM(if ok { 1 } else { 0 }),
             LPARAM(0),
@@ -157,7 +157,7 @@ unsafe fn do_pair_device(hwnd: HWND) {
     st.pair_id = st.pair_id.wrapping_add(1);
     let pair_id = st.pair_id;
     st.pair_cancel = Some(cancel.clone());
-    let raw = hwnd.0;
+    let raw = hwnd.0 as isize;
 
     let pair_hwnd = GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32);
     let _ = SetWindowTextW(pair_hwnd, &hstring("Waiting..."));
@@ -196,7 +196,7 @@ unsafe fn do_pair_device(hwnd: HWND) {
                         approve_url: start.approve_url.clone(),
                     });
                     PostMessageW(
-                        HWND(raw),
+                        HWND(raw as *mut _),
                         WM_APP_PAIR_STARTED,
                         WPARAM(0),
                         LPARAM(Box::into_raw(started) as isize),
@@ -283,7 +283,7 @@ unsafe fn do_pair_device(hwnd: HWND) {
             ),
         };
         unsafe {
-            PostMessageW(HWND(raw), WM_APP_PAIR_RESULT, WPARAM(ok), LPARAM(payload)).ok();
+            PostMessageW(HWND(raw as *mut _), WM_APP_PAIR_RESULT, WPARAM(ok), LPARAM(payload)).ok();
         }
     });
 }
@@ -348,13 +348,13 @@ unsafe fn do_save(hwnd: HWND) {
     apply_startup(&st.config);
     let cfg = st.config.clone();
     let pass = st.password_plain.clone();
-    let raw = hwnd.0;
+    let raw = hwnd.0 as isize;
     let log: crate::sync::LogFn = Arc::new(move |m: String| {
         logs::append(&m);
         let s = Box::new(m);
         unsafe {
             PostMessageW(
-                HWND(raw),
+                HWND(raw as *mut _),
                 WM_APP_LOG,
                 WPARAM(0),
                 LPARAM(Box::into_raw(s) as isize),
@@ -364,7 +364,7 @@ unsafe fn do_save(hwnd: HWND) {
     });
     let activity: crate::sync::ActivityFn = Arc::new(move |info| unsafe {
         PostMessageW(
-            HWND(raw),
+            HWND(raw as *mut _),
             WM_APP_SYNC_ACTIVITY,
             WPARAM(info.state as usize),
             LPARAM(Box::into_raw(Box::new((info.completed, info.total))) as isize),
@@ -372,7 +372,7 @@ unsafe fn do_save(hwnd: HWND) {
             .ok();
     });
     let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
-        PostMessageW(HWND(raw), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
+        PostMessageW(HWND(raw as *mut _), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
     });
     if st.sync_engine.is_some() {
         st.sync_engine = None;
@@ -383,7 +383,7 @@ unsafe fn do_save(hwnd: HWND) {
             st.sync_engine = Some(e);
             let msg = Box::new("Settings saved. File watching is active.".to_string());
             PostMessageW(
-                HWND(raw),
+                HWND(raw as *mut _),
                 WM_APP_LOG,
                 WPARAM(0),
                 LPARAM(Box::into_raw(msg) as isize),
@@ -402,7 +402,7 @@ unsafe fn do_save(hwnd: HWND) {
         std::thread::spawn(move || {
             let ok = webdav::test_connection(&cfg, &pass).is_ok();
             PostMessageW(
-                HWND(raw),
+                HWND(raw as *mut _),
                 WM_APP_CONNECTED,
                 WPARAM(if ok { 1 } else { 0 }),
                 LPARAM(0),
@@ -431,13 +431,13 @@ unsafe fn do_update(hwnd: HWND) {
         )
             .ok();
         ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
-        let raw = hwnd.0;
+        let raw = hwnd.0 as isize;
         std::thread::spawn(move || {
             let _ = crate::updater::download_and_replace(&url, |pct| {
                 let m = Box::new(format!("Downloading: {pct}%"));
                 unsafe {
                     PostMessageW(
-                        HWND(raw),
+                        HWND(raw as *mut _),
                         WM_APP_LOG,
                         WPARAM(0),
                         LPARAM(Box::into_raw(m) as isize),

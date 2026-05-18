@@ -48,7 +48,7 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     } else if len > 0 {
         let mut buf = vec![0u16; (len + 1) as usize];
         GetWindowTextW(di.hwndItem, &mut buf);
-        let hf = HFONT(SendMessageW(di.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as isize);
+        let hf = HFONT(SendMessageW(di.hwndItem, WM_GETFONT, WPARAM(0), LPARAM(0)).0 as *mut _);
         let of = SelectObject(hdc, hf);
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, COLORREF(fg));
@@ -76,15 +76,15 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
 }
 
 unsafe fn draw_github_icon(hdc: HDC, rc: &RECT, hwnd_item: HWND) {
-    let hi = HINSTANCE(GetWindowLongPtrW(GetParent(hwnd_item), GWLP_HINSTANCE) as isize);
+    let hi = HINSTANCE(GetWindowLongPtrW(GetParent(hwnd_item), GWLP_HINSTANCE) as *mut _);
     let icon = LoadIconW(hi, w!("APP_ICON_GITHUB")).unwrap_or_default();
-    if icon.0 == 0 {
+    if icon.0.is_null() {
         return;
     }
 
     let size = 16;
     let x = rc.left + ((rc.right - rc.left - size) / 2);
     let y = rc.top + ((rc.bottom - rc.top - size) / 2);
-    let _ = DrawIconEx(hdc, x, y, icon, size, size, 0, HBRUSH(0), DI_NORMAL);
+    let _ = DrawIconEx(hdc, x, y, icon, size, size, 0, HBRUSH(std::ptr::null_mut()), DI_NORMAL);
 }
 

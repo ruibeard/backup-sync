@@ -1,6 +1,6 @@
 // ── on_create ─────────────────────────────────────────────────────────────────
 unsafe fn on_create(hwnd: HWND) {
-    let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+    let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as *mut _);
 
     let hfont = mkfont("Segoe UI", 12, FW_NORMAL.0 as i32);
     let hfont_hdr = mkfont("Segoe UI", 10, FW_SEMIBOLD.0 as i32);
@@ -42,11 +42,11 @@ unsafe fn on_create(hwnd: HWND) {
         sync_progress_total: 0,
         sync_started_at: None,
         sync_anim_frame: 0,
-        sync_icon: HICON(0),
+        sync_icon: HICON(std::ptr::null_mut()),
         sync_icon_rect: RECT::default(),
         remote_folder_from_xd,
         detected_customer: None,
-        server_tooltip: HWND(0),
+        server_tooltip: HWND(std::ptr::null_mut()),
         server_tooltip_text: Vec::new(),
         status_dot_color: C_RED,
         status_ok_icon: load_imageres_icon(106),
@@ -70,7 +70,7 @@ unsafe fn on_create(hwnd: HWND) {
         bottom_bar_h: 0,
         divider_activity_idx: 0,
         min_client_h: 0,
-        pair_qr_hwnd: HWND(0),
+        pair_qr_hwnd: HWND(std::ptr::null_mut()),
         pair_cancel: None,
         pair_id: 0,
         auth_failure_notified: false,
@@ -92,22 +92,22 @@ unsafe fn on_create(hwnd: HWND) {
 
     let hicon = LoadIconW(hi, w!("APP_ICON_IDLE"))
         .unwrap_or(LoadIconW(None, IDI_APPLICATION).unwrap_or_default());
-    SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(hicon.0));
+    SendMessageW(hwnd, WM_SETICON, WPARAM(ICON_BIG as usize), LPARAM(hicon.0 as isize));
     SendMessageW(
         hwnd,
         WM_SETICON,
         WPARAM(ICON_SMALL as usize),
-        LPARAM(hicon.0),
+        LPARAM(hicon.0 as isize),
     );
     tray::add_tray_icon(hwnd, hicon);
 
-    let raw = hwnd.0;
+    let raw = hwnd.0 as isize;
     let log: crate::sync::LogFn = Arc::new(move |m: String| {
         logs::append(&m);
         let s = Box::new(m);
         unsafe {
             PostMessageW(
-                HWND(raw),
+                HWND(raw as *mut _),
                 WM_APP_LOG,
                 WPARAM(0),
                 LPARAM(Box::into_raw(s) as isize),
@@ -117,7 +117,7 @@ unsafe fn on_create(hwnd: HWND) {
     });
     let activity: crate::sync::ActivityFn = Arc::new(move |info| unsafe {
         PostMessageW(
-            HWND(raw),
+            HWND(raw as *mut _),
             WM_APP_SYNC_ACTIVITY,
             WPARAM(info.state as usize),
             LPARAM(Box::into_raw(Box::new((info.completed, info.total))) as isize),
@@ -125,7 +125,7 @@ unsafe fn on_create(hwnd: HWND) {
         .ok();
     });
     let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
-        PostMessageW(HWND(raw), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
+        PostMessageW(HWND(raw as *mut _), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
     });
 
     if sync_configured {
@@ -140,7 +140,7 @@ unsafe fn on_create(hwnd: HWND) {
             Err(err) => {
                 let msg = Box::new(format!("Sync start failed: {err}"));
                 PostMessageW(
-                    HWND(raw),
+                    HWND(raw as *mut _),
                     WM_APP_LOG,
                     WPARAM(0),
                     LPARAM(Box::into_raw(msg) as isize),
@@ -157,7 +157,7 @@ unsafe fn on_create(hwnd: HWND) {
             if let Some(detected) = crate::xd::detect_customer_hint() {
                 unsafe {
                     PostMessageW(
-                        HWND(raw),
+                        HWND(raw as *mut _),
                         WM_APP_REMOTE_FOLDER,
                         WPARAM(0),
                         LPARAM(Box::into_raw(Box::new(detected)) as isize),
@@ -179,7 +179,7 @@ unsafe fn on_create(hwnd: HWND) {
         std::thread::spawn(move || {
             let ok = crate::webdav::test_connection(&cfg2, &pass2).is_ok();
             PostMessageW(
-                HWND(raw),
+                HWND(raw as *mut _),
                 WM_APP_CONNECTED,
                 WPARAM(if ok { 1 } else { 0 }),
                 LPARAM(0),
@@ -194,7 +194,7 @@ unsafe fn on_create(hwnd: HWND) {
                 crate::logs::append(&format!("Update available: v{}", info.version));
                 let url = Box::new(info.url);
                 PostMessageW(
-                    HWND(raw),
+                    HWND(raw as *mut _),
                     WM_APP_UPDATE,
                     WPARAM(0),
                     LPARAM(Box::into_raw(url) as isize),
@@ -922,11 +922,11 @@ unsafe fn install_server_tooltip(hwnd: HWND, hi: HINSTANCE) {
         0,
         0,
         hwnd,
-        HMENU(0),
+        HMENU(std::ptr::null_mut()),
         hi,
         None,
     );
-    if tooltip.0 == 0 {
+    if tooltip.0.is_null() {
         return;
     }
 
@@ -939,7 +939,7 @@ unsafe fn install_server_tooltip(hwnd: HWND, hi: HINSTANCE) {
 
     for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_STATUS_TEXT] {
         let target = GetDlgItem(hwnd, target_id as i32);
-        if target.0 == 0 {
+        if target.0.is_null() {
             continue;
         }
         let mut ti = TTTOOLINFOW {
@@ -1000,7 +1000,7 @@ fn non_empty_str(value: &str) -> Option<&str> {
 
 unsafe fn update_server_tooltip(hwnd: HWND) {
     let st = stmut(hwnd);
-    if st.server_tooltip.0 == 0 {
+    if st.server_tooltip.0.is_null() {
         return;
     }
     st.server_tooltip_text = server_tooltip_text(&st.config)
@@ -1009,7 +1009,7 @@ unsafe fn update_server_tooltip(hwnd: HWND) {
         .collect();
     for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_STATUS_TEXT] {
         let target = GetDlgItem(hwnd, target_id as i32);
-        if target.0 == 0 {
+        if target.0.is_null() {
             continue;
         }
         let mut ti = TTTOOLINFOW {
@@ -1018,7 +1018,7 @@ unsafe fn update_server_tooltip(hwnd: HWND) {
             hwnd,
             uId: target.0 as usize,
             rect: RECT::default(),
-            hinst: HINSTANCE(0),
+            hinst: HINSTANCE(std::ptr::null_mut()),
             lpszText: PWSTR(st.server_tooltip_text.as_mut_ptr()),
             lParam: LPARAM(0),
             lpReserved: std::ptr::null_mut(),

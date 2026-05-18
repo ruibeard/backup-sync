@@ -1,8 +1,8 @@
 unsafe fn show_pair_qr_window(parent: HWND, code: &str, approve_url: &str) {
     let st = stmut(parent);
-    if st.pair_qr_hwnd.0 != 0 && IsWindow(st.pair_qr_hwnd).as_bool() {
+    if !st.pair_qr_hwnd.0.is_null() && IsWindow(st.pair_qr_hwnd).as_bool() {
         DestroyWindow(st.pair_qr_hwnd).ok();
-        st.pair_qr_hwnd = HWND(0);
+        st.pair_qr_hwnd = HWND(std::ptr::null_mut());
     }
 
     let hinstance: HINSTANCE = GetModuleHandleW(None).unwrap().into();
@@ -33,7 +33,7 @@ unsafe fn show_pair_qr_window(parent: HWND, code: &str, approve_url: &str) {
         Some(Box::into_raw(state) as *const c_void),
     );
 
-    if hwnd.0 == 0 {
+    if hwnd.0.is_null() {
         return;
     }
 
@@ -92,8 +92,8 @@ unsafe extern "system" fn pair_qr_wnd_proc(
             LRESULT(0)
         }
         WM_CTLCOLORSTATIC => {
-            let hdc = HDC(wp.0 as isize);
-            let id = GetDlgCtrlID(HWND(lp.0)) as u16;
+            let hdc = HDC(wp.0 as *mut _);
+            let id = GetDlgCtrlID(HWND(lp.0 as *mut _)) as u16;
             SetBkMode(hdc, TRANSPARENT);
             SetTextColor(
                 hdc,
@@ -272,11 +272,11 @@ unsafe fn pair_qr_on_destroy(hwnd: HWND) {
     }
     let st = Box::from_raw(ptr);
     let parent = st.parent;
-    if parent.0 != 0 && IsWindow(parent).as_bool() {
+    if !parent.0.is_null() && IsWindow(parent).as_bool() {
         cancel_pairing_from_popup(parent);
         let parent_state = state_ptr(parent);
         if !parent_state.is_null() && (*parent_state).pair_qr_hwnd == hwnd {
-            (*parent_state).pair_qr_hwnd = HWND(0);
+            (*parent_state).pair_qr_hwnd = HWND(std::ptr::null_mut());
         }
     }
     DeleteObject(st.hfont);

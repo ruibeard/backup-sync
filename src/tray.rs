@@ -13,7 +13,7 @@ pub const ID_TRAY_EXIT: usize = 1003;
 
 unsafe fn fill_tip(dst: &mut [u16; 128], text: &str) {
     let wide = HSTRING::from(text);
-    let src = wide.as_wide();
+    let src = &*wide;
     let len = src.len().min(127);
     dst[..len].copy_from_slice(&src[..len]);
 }
@@ -77,6 +77,6 @@ pub unsafe fn show_tray_menu(hwnd: HWND) {
     // Required so menu dismisses when clicking elsewhere
     let _ = SetForegroundWindow(hwnd).ok();
 
-    TrackPopupMenu(hmenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, None);
+    TrackPopupMenu(hmenu, TPM_RIGHTBUTTON, pt.x, pt.y, Some(0), hwnd, None);
     DestroyMenu(hmenu).ok();
 }

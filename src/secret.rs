@@ -47,7 +47,7 @@ pub fn encrypt(plaintext: &str) -> Result<String, String> {
             let slice = std::slice::from_raw_parts(output.pbData, output.cbData as usize);
             let encoded = B64.encode(slice);
             // Free the output blob allocated by Windows
-            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+            let _ = LocalFree(Some(HLOCAL(output.pbData as *mut _)));
             Ok(encoded)
         } else {
             Err("CryptProtectData failed".into())
@@ -89,7 +89,7 @@ pub fn decrypt(encoded: &str) -> Result<String, String> {
         if ok.is_ok() {
             let slice = std::slice::from_raw_parts(output.pbData, output.cbData as usize);
             let plain = String::from_utf8_lossy(slice).into_owned();
-            let _ = LocalFree(HLOCAL(output.pbData as *mut _));
+            let _ = LocalFree(Some(HLOCAL(output.pbData as *mut _)));
             Ok(plain)
         } else {
             Err("CryptUnprotectData failed".into())

@@ -14,7 +14,7 @@ unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
         return;
     }
 
-    if (*st).sync_icon.0 != 0 {
+    if !(*st).sync_icon.0.is_null() {
         let r = (*st).sync_icon_rect;
         let _ = DrawIconEx(
             hdc,
@@ -24,7 +24,7 @@ unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
             r.right - r.left,
             r.bottom - r.top,
             0,
-            HBRUSH(0),
+            HBRUSH(std::ptr::null_mut()),
             DI_NORMAL,
         );
     }

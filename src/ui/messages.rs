@@ -87,9 +87,9 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
             st.sync_anim_frame = 0;
             let _ = SetTimer(hwnd, IDT_SYNC_ANIM, SYNC_ANIM_MS, None);
         }
-        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as *mut _);
         let hicon = LoadIconW(hi, icon_name).unwrap_or_default();
-        if hicon.0 != 0 {
+        if !hicon.0.is_null() {
             tray::set_tray_icon_and_tip(
                 hwnd,
                 hicon,
@@ -101,9 +101,9 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     } else {
         st.sync_started_at = None;
         let _ = KillTimer(hwnd, IDT_SYNC_ANIM);
-        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as *mut _);
         let hicon = LoadIconW(hi, icon_name).unwrap_or_default();
-        if hicon.0 != 0 {
+        if !hicon.0.is_null() {
             tray::set_tray_icon_and_tip(hwnd, hicon, "Backup Sync Tool");
             st.sync_icon = hicon;
             InvalidateRect(hwnd, Some(&st.sync_icon_rect), TRUE);
@@ -121,9 +121,9 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let pct = ((progress.0.min(progress.1) * 100) / progress.1) as isize;
         SendMessageW(progress_hwnd, PBM_SETPOS, WPARAM(pct as usize), LPARAM(0));
         ShowWindow(progress_hwnd, SW_SHOW);
-        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+        let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as *mut _);
         let tip_icon = LoadIconW(hi, w!("APP_ICON_SYNCING")).unwrap_or_default();
-        if tip_icon.0 != 0 {
+        if !tip_icon.0.is_null() {
             tray::set_tray_icon_and_tip(
                 hwnd,
                 tip_icon,
@@ -159,7 +159,7 @@ unsafe fn on_timer(hwnd: HWND, wp: WPARAM) -> LRESULT {
         w!("APP_ICON_SYNC_5"),
         w!("APP_ICON_SYNC_6"),
     ];
-    let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+    let hi = HINSTANCE(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) as *mut _);
     let icon_name = names[st.sync_anim_frame % names.len()];
     st.sync_anim_frame = (st.sync_anim_frame + 1) % names.len();
     let hicon = LoadIconW(hi, icon_name).unwrap_or_default();
@@ -260,7 +260,7 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let st = stmut(hwnd);
         st.pair_cancel = None;
         let qr_hwnd = st.pair_qr_hwnd;
-        if qr_hwnd.0 != 0 && IsWindow(qr_hwnd).as_bool() {
+        if !qr_hwnd.0.is_null() && IsWindow(qr_hwnd).as_bool() {
             DestroyWindow(qr_hwnd).ok();
         }
         restore_pair_idle_controls(hwnd);
@@ -284,7 +284,7 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let st = stmut(hwnd);
     st.pair_cancel = None;
     let qr_hwnd = st.pair_qr_hwnd;
-    if qr_hwnd.0 != 0 && IsWindow(qr_hwnd).as_bool() {
+    if !qr_hwnd.0.is_null() && IsWindow(qr_hwnd).as_bool() {
         DestroyWindow(qr_hwnd).ok();
     }
     restore_pair_idle_controls(hwnd);
@@ -359,7 +359,7 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
 }
 
 unsafe fn cancel_pairing_from_popup(parent: HWND) {
-    if parent.0 == 0 || !IsWindow(parent).as_bool() {
+    if parent.0.is_null() || !IsWindow(parent).as_bool() {
         return;
     }
     let parent_state = state_ptr(parent);
