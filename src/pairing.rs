@@ -7,8 +7,6 @@ pub struct PairStartRequest {
     pub app_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detected_folder: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detected_customer: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -37,14 +35,12 @@ pub fn start_pairing(
     windows_user: &str,
     app_version: &str,
     detected_folder: Option<String>,
-    detected_customer: Option<String>,
 ) -> Option<PairStartResponse> {
     let req = PairStartRequest {
         machine_name: machine_name.to_string(),
         windows_user: windows_user.to_string(),
         app_version: app_version.to_string(),
         detected_folder,
-        detected_customer,
     };
     let url = format!("{}/api/pair/start", api_base.trim_end_matches('/'));
     let res = ureq::post(&url)

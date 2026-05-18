@@ -3,7 +3,6 @@
 #![windows_subsystem = "windows"]
 
 mod config;
-mod credential_refresh;
 mod logs;
 mod pairing;
 mod secret;

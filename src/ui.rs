@@ -91,8 +91,7 @@ const WM_APP_REMOTE_FOLDER: u32 = WM_APP + 13;
 const WM_APP_SYNC_ACTIVITY: u32 = WM_APP + 16;
 const WM_APP_PAIR_RESULT: u32 = WM_APP + 17;
 const WM_APP_PAIR_STARTED: u32 = WM_APP + 18;
-const WM_APP_CREDENTIAL_REFRESH: u32 = WM_APP + 19;
-const WM_APP_REFRESH_RESULT: u32 = WM_APP + 20;
+const WM_APP_AUTH_FAILED: u32 = WM_APP + 19;
 const IDT_SYNC_ANIM: usize = 1;
 const SYNC_ANIM_MS: u32 = 120;
 
@@ -184,15 +183,15 @@ struct WndState {
     pair_qr_hwnd: HWND,
     pair_cancel: Option<Arc<AtomicBool>>,
     pair_id: u64,
-    refresh_in_progress: bool,
+    auth_failure_notified: bool,
 }
 
 struct PairResult {
     pair_id: u64,
     device_token: String,
-    webdav_url: Option<String>,
-    username: Option<String>,
-    password: Option<String>,
+    webdav_url: String,
+    username: String,
+    password: String,
     remote_folder: String,
     credential_profile_id: Option<u64>,
     credential_version: Option<u64>,
@@ -206,19 +205,6 @@ struct PairStarted {
 
 struct PairError {
     pair_id: u64,
-    message: String,
-}
-
-struct RefreshResult {
-    webdav_url: Option<String>,
-    username: Option<String>,
-    password: String,
-    remote_folder: Option<String>,
-    credential_profile_id: Option<u64>,
-    credential_version: Option<u64>,
-}
-
-struct RefreshError {
     message: String,
 }
 
@@ -422,8 +408,7 @@ unsafe extern "system" fn wnd_proc(
         WM_APP_SYNC_ACTIVITY => on_app_sync_activity(hwnd, wparam, lparam),
         WM_APP_PAIR_STARTED => on_app_pair_started(hwnd, lparam),
         WM_APP_PAIR_RESULT => on_app_pair_result(hwnd, wparam, lparam),
-        WM_APP_CREDENTIAL_REFRESH => on_app_credential_refresh(hwnd),
-        WM_APP_REFRESH_RESULT => on_app_refresh_result(hwnd, wparam, lparam),
+        WM_APP_AUTH_FAILED => on_app_auth_failed(hwnd),
         WM_TIMER => on_timer(hwnd, wparam),
 
         WM_CLOSE => {
@@ -748,7 +733,7 @@ unsafe fn on_create(hwnd: HWND) {
         pair_qr_hwnd: HWND(0),
         pair_cancel: None,
         pair_id: 0,
-        refresh_in_progress: false,
+        auth_failure_notified: false,
     });
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
 
@@ -800,7 +785,7 @@ unsafe fn on_create(hwnd: HWND) {
         .ok();
     });
     let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
-        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
+        PostMessageW(HWND(raw), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
     });
 
     if sync_configured {
@@ -825,7 +810,9 @@ unsafe fn on_create(hwnd: HWND) {
         }
     }
 
-    if !is_paired(&cfg) && (cfg.remote_folder.trim().is_empty() || is_root_remote_folder(&cfg.remote_folder)) {
+    if !is_paired(&cfg)
+        && (cfg.remote_folder.trim().is_empty() || is_root_remote_folder(&cfg.remote_folder))
+    {
         std::thread::spawn(move || {
             if let Some(detected) = crate::xd::detect_customer_hint() {
                 unsafe {
@@ -997,8 +984,11 @@ unsafe fn build_ui(
         );
         y += INP_H + GAP;
 
-        let destination_text =
-            destination_display_text(cfg, st.remote_folder_from_xd, st.detected_customer.as_deref());
+        let destination_text = destination_display_text(
+            cfg,
+            st.remote_folder_from_xd,
+            st.detected_customer.as_deref(),
+        );
 
         mkstatic(
             hwnd,
@@ -1950,7 +1940,6 @@ unsafe fn do_pair_device(hwnd: HWND) {
     } else {
         None
     };
-    let mut detected_customer = st.detected_customer.clone().and_then(non_empty);
     let cancel = Arc::new(AtomicBool::new(false));
     st.pair_id = st.pair_id.wrapping_add(1);
     let pair_id = st.pair_id;
@@ -1964,11 +1953,10 @@ unsafe fn do_pair_device(hwnd: HWND) {
     );
 
     std::thread::spawn(move || {
-        if detected_folder.is_none() || detected_customer.is_none() {
+        if detected_folder.is_none() {
             if let Some(detected) = crate::xd::detect_customer_hint() {
-                detected_folder.get_or_insert(detected.folder);
-                if let Some(customer) = non_empty(detected.customer) {
-                    detected_customer.get_or_insert(customer);
+                if let Some(folder) = non_empty(detected.folder) {
+                    detected_folder.get_or_insert(folder);
                 }
             }
         }
@@ -1981,7 +1969,6 @@ unsafe fn do_pair_device(hwnd: HWND) {
             &windows_user,
             version,
             detected_folder,
-            detected_customer,
         ) {
             Some(start) => {
                 unsafe {
@@ -2019,30 +2006,49 @@ unsafe fn do_pair_device(hwnd: HWND) {
                     {
                         match status.status.as_str() {
                             "approved" => {
-                                if let Some(device_token) =
-                                    non_empty(status.device_token.unwrap_or_default())
-                                {
-                                    let remote_folder = match approved_remote_folder(
-                                        status.remote_folder.as_deref(),
-                                    ) {
+                                let device_token =
+                                    match required_pair_field(status.device_token, "device token") {
+                                        Ok(value) => value,
+                                        Err(err) => break Err(err),
+                                    };
+                                let webdav_url =
+                                    match required_pair_field(status.webdav_url, "server URL") {
+                                        Ok(value) => value,
+                                        Err(err) => break Err(err),
+                                    };
+                                if let Err(err) = validate_webdav_url(&webdav_url) {
+                                    break Err(format!("Pairing approved with invalid server URL: {err}"));
+                                }
+                                let username =
+                                    match required_pair_field(status.username, "username") {
+                                        Ok(value) => value,
+                                        Err(err) => break Err(err),
+                                    };
+                                let password =
+                                    match required_pair_field(status.password, "password") {
+                                        Ok(value) => value,
+                                        Err(err) => break Err(err),
+                                    };
+                                let remote_folder =
+                                    match approved_remote_folder(status.remote_folder.as_deref()) {
                                         Ok(folder) => folder,
                                         Err(err) => break Err(err),
                                     };
-                                    break Ok(PairResult {
-                                        pair_id,
-                                        device_token,
-                                        webdav_url: status.webdav_url,
-                                        username: status.username,
-                                        password: status.password,
-                                        remote_folder,
-                                        credential_profile_id: status.credential_profile_id,
-                                        credential_version: status.credential_version,
-                                    });
-                                }
-                                break Err("Pairing approved but no device token was returned."
-                                    .to_string());
+                                break Ok(PairResult {
+                                    pair_id,
+                                    device_token,
+                                    webdav_url,
+                                    username,
+                                    password,
+                                    remote_folder,
+                                    credential_profile_id: status.credential_profile_id,
+                                    credential_version: status.credential_version,
+                                });
                             }
                             "rejected" => break Err("Pairing was rejected.".to_string()),
+                            "expired" => break Err("Pairing request expired. Start pairing again.".to_string()),
+                            "consumed" => break Err("Pairing payload was already consumed. Start pairing again.".to_string()),
+                            "failed" => break Err("Pairing was approved but the server payload is missing. Start pairing again.".to_string()),
                             _ => {}
                         }
                     }
@@ -2148,7 +2154,7 @@ unsafe fn do_save(hwnd: HWND) {
         .ok();
     });
     let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
-        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
+        PostMessageW(HWND(raw), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
     });
     if st.sync_engine.is_some() {
         st.sync_engine = None;
@@ -2742,257 +2748,41 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     LRESULT(0)
 }
 
-unsafe fn on_app_credential_refresh(hwnd: HWND) -> LRESULT {
+unsafe fn on_app_auth_failed(hwnd: HWND) -> LRESULT {
     let st = stmut(hwnd);
-    if st.refresh_in_progress {
+    if st.auth_failure_notified {
         return LRESULT(0);
     }
-    st.refresh_in_progress = true;
-    logs::append("Credential refresh requested.");
-    let msg = Box::new("Credential refresh requested.".to_string());
-    PostMessageW(
-        hwnd,
-        WM_APP_LOG,
-        WPARAM(0),
-        LPARAM(Box::into_raw(msg) as isize),
-    )
-    .ok();
-    do_credential_refresh(hwnd);
-    LRESULT(0)
-}
-
-unsafe fn do_credential_refresh(hwnd: HWND) {
-    let st = stmut(hwnd);
-    let cfg = st.config.clone();
-    let raw = hwnd.0 as isize;
-    std::thread::spawn(move || {
-        let result = credential_refresh_worker(raw, cfg);
-        let (ok, payload): (usize, isize) = match result {
-            Ok(refresh) => (1, Box::into_raw(Box::new(refresh)) as isize),
-            Err(message) => (
-                0,
-                Box::into_raw(Box::new(RefreshError { message })) as isize,
-            ),
-        };
-        unsafe {
-            PostMessageW(
-                HWND(raw),
-                WM_APP_REFRESH_RESULT,
-                WPARAM(ok),
-                LPARAM(payload),
-            )
-            .ok();
-        }
-    });
-}
-
-fn credential_refresh_worker(
-    raw: isize,
-    cfg: Config,
-) -> std::result::Result<RefreshResult, String> {
-    let device_token = secret::decrypt(&cfg.device_token_enc)
-        .map_err(|e| format!("Could not decrypt device token: {e}"))?;
-    if device_token.trim().is_empty() {
-        return Err("Device is not paired; credential refresh cannot start.".to_string());
-    }
-
-    let start = crate::credential_refresh::start_refresh(&cfg.pair_api_base, &device_token)?;
-    logs::append(&format!(
-        "Credential refresh approval URL: {}",
-        start.approve_url
-    ));
-    let msg = Box::new(format!(
-        "Credential refresh approval URL: {}",
-        start.approve_url
-    ));
-    unsafe {
-        PostMessageW(
-            HWND(raw),
-            WM_APP_LOG,
-            WPARAM(0),
-            LPARAM(Box::into_raw(msg) as isize),
-        )
-        .ok();
-        let _ = ShellExecuteW(
-            HWND(raw),
-            w!("open"),
-            &hstring(&start.approve_url),
-            None,
-            None,
-            SW_SHOWNORMAL,
-        );
-    }
-
-    let sleep_ms = start.poll_interval_ms.clamp(1000, 10_000);
-    let started = std::time::Instant::now();
-    loop {
-        if started.elapsed() > std::time::Duration::from_secs(300) {
-            return Err("Credential refresh timed out.".to_string());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
-        let status = crate::credential_refresh::poll_refresh(
-            &cfg.pair_api_base,
-            &start.request_token,
-            &device_token,
-        )?;
-        match status.status.as_str() {
-            "approved" => {
-                let Some(password) = status.password else {
-                    return Err(
-                        "Credential refresh approved but no password was returned.".to_string()
-                    );
-                };
-                return Ok(RefreshResult {
-                    webdav_url: status.webdav_url,
-                    username: status.username,
-                    password,
-                    remote_folder: status.remote_folder,
-                    credential_profile_id: status.credential_profile_id,
-                    credential_version: status.credential_version,
-                });
-            }
-            "rejected" => return Err("Credential refresh was rejected.".to_string()),
-            _ => {}
-        }
-    }
-}
-
-unsafe fn on_app_refresh_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let st = stmut(hwnd);
-    st.refresh_in_progress = false;
-
-    if wp.0 != 1 {
-        let err = Box::from_raw(lp.0 as *mut RefreshError);
-        logs::append(&format!("Credential refresh failed: {}", err.message));
-        let msg = Box::new(format!("Credential refresh failed: {}", err.message));
-        PostMessageW(
-            hwnd,
-            WM_APP_LOG,
-            WPARAM(0),
-            LPARAM(Box::into_raw(msg) as isize),
-        )
-        .ok();
-        return LRESULT(0);
-    }
-
-    let refresh = Box::from_raw(lp.0 as *mut RefreshResult);
-    if let Err(message) =
-        validate_refresh_remote_folder(&st.config, refresh.remote_folder.as_deref())
-    {
-        logs::append(&format!("Credential refresh rejected: {message}"));
-        let msg = Box::new(format!("Credential refresh rejected: {message}"));
-        PostMessageW(
-            hwnd,
-            WM_APP_LOG,
-            WPARAM(0),
-            LPARAM(Box::into_raw(msg) as isize),
-        )
-        .ok();
-        msgbox(hwnd, &message, "Credential Refresh");
-        return LRESULT(0);
-    }
-
-    if let Some(webdav_url) = &refresh.webdav_url {
-        st.config.webdav_url = webdav_url.clone();
-        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_URL as i32), &hstring(webdav_url));
-    }
-    if let Some(username) = &refresh.username {
-        st.config.username = username.clone();
-        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_USERNAME as i32), &hstring(username));
-    }
-    match secret::encrypt(&refresh.password) {
-        Ok(enc) => {
-            st.config.password_enc = enc;
-            st.password_plain = refresh.password.clone();
-            let _ = SetWindowTextW(
-                GetDlgItem(hwnd, IDC_PASSWORD as i32),
-                &hstring(&refresh.password),
-            );
-        }
-        Err(e) => {
-            msgbox(
-                hwnd,
-                &format!("Credential refresh succeeded but password encryption failed: {e}"),
-                "Credential Refresh",
-            );
-            return LRESULT(0);
-        }
-    }
-    st.config.credential_profile_id = refresh.credential_profile_id;
-    st.config.credential_version = refresh.credential_version;
-
-    if let Err(e) = crate::config::save(&st.config) {
-        msgbox(
-            hwnd,
-            &format!("Credential refresh succeeded but save failed: {e}"),
-            "Credential Refresh",
-        );
-        return LRESULT(0);
-    }
-
-    restart_sync_after_credential_refresh(hwnd);
-    apply_server_readonly(hwnd);
-    start_connection_check(hwnd);
-    logs::append("Credential refresh applied.");
-    let msg = Box::new("Credential refresh applied.".to_string());
-    PostMessageW(
-        hwnd,
-        WM_APP_LOG,
-        WPARAM(0),
-        LPARAM(Box::into_raw(msg) as isize),
-    )
-    .ok();
-    LRESULT(0)
-}
-
-unsafe fn restart_sync_after_credential_refresh(hwnd: HWND) {
-    let st = stmut(hwnd);
+    st.auth_failure_notified = true;
     if st.sync_engine.is_some() {
         st.sync_engine = None;
     }
-    let cfg = st.config.clone();
-    let pass = st.password_plain.clone();
-    let raw = hwnd.0 as isize;
-    let log: crate::sync::LogFn = Arc::new(move |m: String| {
-        logs::append(&m);
-        let s = Box::new(m);
-        unsafe {
-            PostMessageW(
-                HWND(raw),
-                WM_APP_LOG,
-                WPARAM(0),
-                LPARAM(Box::into_raw(s) as isize),
-            )
-            .ok();
-        }
-    });
-    let activity: crate::sync::ActivityFn = Arc::new(move |info| unsafe {
-        PostMessageW(
-            HWND(raw),
-            WM_APP_SYNC_ACTIVITY,
-            WPARAM(info.state as usize),
-            LPARAM(Box::into_raw(Box::new((info.completed, info.total))) as isize),
-        )
-        .ok();
-    });
-    let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
-        PostMessageW(HWND(raw), WM_APP_CREDENTIAL_REFRESH, WPARAM(0), LPARAM(0)).ok();
-    });
-    match crate::sync::SyncEngine::start(cfg, pass, log, activity, auth_failed) {
-        Ok(engine) => stmut(hwnd).sync_engine = Some(engine),
-        Err(err) => {
-            let msg = Box::new(format!(
-                "Sync restart after credential refresh failed: {err}"
-            ));
-            PostMessageW(
-                hwnd,
-                WM_APP_LOG,
-                WPARAM(0),
-                LPARAM(Box::into_raw(msg) as isize),
-            )
-            .ok();
-        }
-    }
+    st.connected = false;
+    logs::append("WebDAV authentication failed. Automatic sync paused; pair again to continue.");
+    let msg = Box::new(
+        "WebDAV credentials are invalid. Automatic sync paused; pair again to continue."
+            .to_string(),
+    );
+    PostMessageW(
+        hwnd,
+        WM_APP_LOG,
+        WPARAM(0),
+        LPARAM(Box::into_raw(msg) as isize),
+    )
+    .ok();
+    let _ = SetWindowTextW(
+        GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
+        &hstring("Credentials invalid"),
+    );
+    set_status(hwnd, "\u{25cf}");
+    ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
+    InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
+    msgbox(
+        hwnd,
+        "WebDAV credentials are invalid. Pair again to continue syncing.",
+        "Credentials Invalid",
+    );
+    LRESULT(0)
 }
 
 unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -3045,33 +2835,34 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
             return LRESULT(0);
         }
     }
-    if let Some(webdav_url) = &pair.webdav_url {
-        st.config.webdav_url = webdav_url.clone();
-        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_URL as i32), &hstring(webdav_url));
-    }
-    if let Some(username) = &pair.username {
-        st.config.username = username.clone();
-        let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_USERNAME as i32), &hstring(username));
-    }
-    if let Some(password) = &pair.password {
-        match secret::encrypt(password) {
-            Ok(enc) => {
-                st.config.password_enc = enc;
-                st.password_plain = password.clone();
-                let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_PASSWORD as i32), &hstring(password));
-            }
-            Err(e) => {
-                msgbox(
-                    hwnd,
-                    &format!("WebDAV password encrypt error: {e}"),
-                    "Pair Device",
-                );
-                return LRESULT(0);
-            }
+    st.config.webdav_url = pair.webdav_url.clone();
+    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_URL as i32), &hstring(&pair.webdav_url));
+    st.config.username = pair.username.clone();
+    let _ = SetWindowTextW(
+        GetDlgItem(hwnd, IDC_USERNAME as i32),
+        &hstring(&pair.username),
+    );
+    match secret::encrypt(&pair.password) {
+        Ok(enc) => {
+            st.config.password_enc = enc;
+            st.password_plain = pair.password.clone();
+            let _ = SetWindowTextW(
+                GetDlgItem(hwnd, IDC_PASSWORD as i32),
+                &hstring(&pair.password),
+            );
+        }
+        Err(e) => {
+            msgbox(
+                hwnd,
+                &format!("WebDAV password encrypt error: {e}"),
+                "Pair Device",
+            );
+            return LRESULT(0);
         }
     }
     st.config.remote_folder = pair.remote_folder.clone();
     st.remote_folder_from_xd = false;
+    st.auth_failure_notified = false;
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
         &hstring(&pair.remote_folder),
@@ -3188,6 +2979,13 @@ fn is_paired(cfg: &Config) -> bool {
     !cfg.device_token_enc.trim().is_empty()
 }
 
+fn required_pair_field(value: Option<String>, name: &str) -> std::result::Result<String, String> {
+    match value.and_then(non_empty) {
+        Some(value) => Ok(value.trim().to_string()),
+        None => Err(format!("Pairing approved but no {name} was returned.")),
+    }
+}
+
 fn approved_remote_folder(remote_folder: Option<&str>) -> std::result::Result<String, String> {
     let Some(remote_folder) = remote_folder else {
         return Err("Pairing approved but no destination folder was returned.".to_string());
@@ -3199,37 +2997,19 @@ fn approved_remote_folder(remote_folder: Option<&str>) -> std::result::Result<St
                 .to_string(),
         );
     }
-    if raw.starts_with('/') || raw.starts_with('\\') || raw.contains("..") {
+    if raw.starts_with('/')
+        || raw.starts_with('\\')
+        || raw.contains('/')
+        || raw.contains('\\')
+        || raw.contains("..")
+        || raw.chars().any(char::is_control)
+    {
         return Err(
             "Pairing approved with an invalid destination folder. Re-pair after Laravel approves a concrete customer folder."
                 .to_string(),
         );
     }
-    let normalized = normalize_remote_folder(remote_folder);
-    if normalized.is_empty() || is_root_remote_folder(remote_folder) {
-        return Err(
-            "Pairing approved without a customer destination folder. Re-pair after Laravel approves a concrete customer folder."
-                .to_string(),
-        );
-    }
-    Ok(normalized)
-}
-
-fn validate_refresh_remote_folder(
-    cfg: &Config,
-    remote_folder: Option<&str>,
-) -> std::result::Result<(), String> {
-    let Some(remote_folder) = remote_folder else {
-        return Ok(());
-    };
-    let refreshed = approved_remote_folder(Some(remote_folder))?;
-    let paired = normalize_remote_folder(&cfg.remote_folder);
-    if refreshed != paired {
-        return Err(format!(
-            "Credential refresh returned destination '{refreshed}', but this device is paired to '{paired}'. Re-pair to change customer."
-        ));
-    }
-    Ok(())
+    Ok(raw.to_string())
 }
 
 unsafe fn apply_server_readonly(hwnd: HWND) {
@@ -3663,15 +3443,6 @@ unsafe fn center_child_window(parent: HWND, child: HWND, child_w: i32, child_h: 
         SWP_NOSIZE | SWP_NOZORDER,
     )
     .ok();
-}
-
-fn normalize_remote_folder(folder: &str) -> String {
-    folder
-        .replace('\\', "/")
-        .split('/')
-        .filter(|part| !part.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 unsafe fn apply_startup(cfg: &Config) {

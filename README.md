@@ -32,7 +32,7 @@ Non-negotiables:
 - Local and remote manifest tracking with `.backupsynctool-manifest.json`.
 - Pairing flow with server-approved customer folder.
 - Destination folder lock after pairing.
-- Credential refresh after WebDAV auth failure.
+- WebDAV auth failure pauses sync and asks the user/admin to pair again.
 - DPAPI protection for device token and WebDAV password.
 - Start with Windows support.
 - Compact Recent Activity feed.
@@ -44,7 +44,7 @@ Non-negotiables:
 | Path | Purpose |
 | --- | --- |
 | `src/main.rs` | Entry point, module wiring, window/message loop startup |
-| `src/ui.rs` | Main Win32 UI, pairing UX, credential refresh, config locking, event handlers |
+| `src/ui.rs` | Main Win32 UI, pairing UX, config locking, event handlers |
 | `src/config.rs` | Load/save `backupsynctool.json` next to the exe |
 | `src/secret.rs` | DPAPI encrypt/decrypt helpers |
 | `src/webdav.rs` | Blocking WebDAV HTTP client |
@@ -52,7 +52,6 @@ Non-negotiables:
 | `src/tray.rs` | System tray icon and context menu |
 | `src/updater.rs` | GitHub release check, download, swap, restart |
 | `src/pairing.rs` | Pair start/status API client |
-| `src/credential_refresh.rs` | Credential refresh API client |
 | `src/xd.rs` | XD local folder/licence detection |
 | `src/logs.rs` | Local log file append/open support |
 | `build.rs` | Embeds icons and manifest into the exe |
@@ -67,7 +66,6 @@ flowchart TD
     Secret["src/secret.rs\nDPAPI"]
     XD["src/xd.rs\nXD licence detection"]
     Pairing["src/pairing.rs\npair API"]
-    Refresh["src/credential_refresh.rs\ncredential refresh API"]
     Sync["src/sync.rs\nwatcher + manifest + transfers"]
     WebDAV["src/webdav.rs\nWebDAV client"]
     Tray["src/tray.rs\ntray icon/menu"]
@@ -78,7 +76,6 @@ flowchart TD
     UI <--> Secret
     UI --> XD
     UI --> Pairing
-    UI --> Refresh
     UI --> Sync
     UI --> Tray
     UI --> Updater
@@ -171,14 +168,14 @@ sequenceDiagram
 
     User->>App: Click Pair
     App->>XD: Detect local hints
-    XD-->>App: detected_folder, detected_customer
+    XD-->>App: detected_folder
     App->>API: POST /api/pair/start
     API-->>App: code, approve_url, poll_token
     App-->>User: Show QR/code popup
     Admin->>API: Approve customer/folder
-    loop Poll until approved/rejected/cancelled/timeout
+    loop Poll until approved/rejected/expired/consumed/failed/cancelled/timeout
         App->>API: GET /api/pair/status/{poll_token}
-        API-->>App: pending/approved/rejected
+        API-->>App: pending/approved/rejected/expired/consumed/failed
     end
     API-->>App: device_token, credentials, approved remote_folder
     App->>App: Validate and save approved config
@@ -193,18 +190,18 @@ Pair start request:
   "machine_name": "RECEPTION-PC",
   "windows_user": "office",
   "app_version": "2026.0.3",
-  "detected_folder": "XDPT.59655-Palmeira-Minimercado",
-  "detected_customer": "Palmeira Minimercado"
+  "detected_folder": "XDPT.59655-Palmeira-Minimercado"
 }
 ```
 
 Rules:
 
-- `detected_folder` and `detected_customer` are hints only.
-- Both come from XD licence detection in `src/xd.rs`.
-- They must not come from the editable destination textbox.
-- If XD detection fails, those fields are omitted.
+- `detected_folder` is a hint only.
+- It comes from XD licence detection in `src/xd.rs`.
+- It must not come from the editable destination textbox.
+- If XD detection fails, the field is omitted.
 - The approved `remote_folder` must come back from the server.
+- Pair polling handles exact terminal statuses: `approved`, `rejected`, `expired`, `consumed`, and `failed`.
 
 Approved response shape:
 
@@ -224,11 +221,16 @@ Approved response shape:
 The app rejects approved pairing if:
 
 - `device_token` is missing or empty.
+- `webdav_url` is missing or does not start with `https://`.
+- `username` is missing or empty.
+- `password` is missing or empty.
 - `remote_folder` is missing.
 - `remote_folder` is empty.
 - `remote_folder` is `/` or `\`.
 - `remote_folder` starts with `/` or `\`.
+- `remote_folder` contains `/` or `\`.
 - `remote_folder` contains `..`.
+- `remote_folder` contains ASCII control characters.
 
 Once paired:
 
@@ -272,52 +274,16 @@ upload URL:    https://example.com/webdav/XD-BACKUPS/XDPT.59655-Palmeira-Minimer
 
 The sync engine must always use the stored approved `remote_folder` for paired devices.
 
-## Credential Refresh
+## Credential Failure
 
-Credential refresh starts only after WebDAV authentication failure and only for paired devices.
+Credential refresh is not part of the active desktop protocol.
 
-```mermaid
-sequenceDiagram
-    participant Sync
-    participant UI as App UI Thread
-    participant API as Server API
-    participant WebDAV
+On WebDAV `401` or `403`:
 
-    Sync->>WebDAV: Request with stored credentials
-    WebDAV-->>Sync: Auth failed
-    Sync->>UI: Request credential refresh
-    UI->>API: POST /api/device/credential-refresh/start
-    API-->>UI: request_token, approve_url, poll_interval_ms
-    loop Poll while pending
-        UI->>API: GET /api/device/credential-refresh/status/{request_token}
-        API-->>UI: pending/approved/rejected
-    end
-    UI->>UI: Validate remote_folder if returned
-    UI->>UI: DPAPI-save new password
-    UI->>Sync: Restart sync engine
-```
-
-Refresh start:
-
-```text
-POST /api/device/credential-refresh/start
-Authorization: Bearer <device_token>
-```
-
-Refresh poll:
-
-```text
-GET /api/device/credential-refresh/status/{request_token}
-Authorization: Bearer <device_token>
-```
-
-Refresh rules:
-
-- Approved refresh must include `password`.
-- `remote_folder` may be omitted.
-- If `remote_folder` is returned, it must match the already paired folder after normalization.
-- Refresh must never change the approved folder.
-- Accepted refresh saves new credentials and restarts sync before the next upload.
+- Automatic sync is paused.
+- A local activity/log message says the credentials are invalid.
+- The UI asks the user/admin to pair again.
+- The app does not call `/api/device/credential-refresh/*`.
 
 ## UI Behavior
 
@@ -395,7 +361,7 @@ Before changing pairing, sync, config, or credential handling:
 - Check whether the device is paired using `device_token_enc`.
 - Do not trust editable UI fields for server-owned values.
 - Do not allow `Save` to overwrite paired `remote_folder`.
-- Do not make credential refresh change customer folder.
+- Do not reintroduce credential refresh unless the protocol changes again.
 - Keep DPAPI encryption for token/password.
 - Keep sync URLs rooted at stored `webdav_url` + stored `remote_folder`.
 - Rebuild release, copy exe to root, relaunch from root after code changes.
