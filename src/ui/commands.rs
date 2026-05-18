@@ -92,7 +92,14 @@ unsafe fn do_open_local_folder(hwnd: HWND) {
         msgbox(hwnd, "Origin folder does not exist.", "Open Folder");
         return;
     }
-    let _ = ShellExecuteW(hwnd, w!("open"), &hstring(folder), None, None, SW_SHOWNORMAL);
+    let _ = ShellExecuteW(
+        hwnd,
+        w!("open"),
+        &hstring(folder),
+        None,
+        None,
+        SW_SHOWNORMAL,
+    );
 }
 
 unsafe extern "system" fn browse_local_init_cb(
@@ -119,7 +126,6 @@ unsafe fn do_connect(hwnd: HWND) {
     ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
     // Show amber/yellow dot while connecting.
     set_status_dot_color(hwnd, C_AMBER);
-    set_status(hwnd, "\u{25cf}");
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
         &hstring("Connecting"),
@@ -134,7 +140,7 @@ unsafe fn do_connect(hwnd: HWND) {
             WPARAM(if ok { 1 } else { 0 }),
             LPARAM(0),
         )
-        .ok();
+            .ok();
     });
 }
 
@@ -158,7 +164,6 @@ unsafe fn do_pair_device(hwnd: HWND) {
     EnableWindow(pair_hwnd, FALSE);
     ShowWindow(GetDlgItem(hwnd, IDC_SAVE as i32), SW_HIDE);
     set_status_dot_color(hwnd, C_AMBER);
-    set_status(hwnd, "\u{25cf}");
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
         &hstring("Waiting for approval"),
@@ -196,7 +201,7 @@ unsafe fn do_pair_device(hwnd: HWND) {
                         WPARAM(0),
                         LPARAM(Box::into_raw(started) as isize),
                     )
-                    .ok();
+                        .ok();
                 }
 
                 let started = std::time::Instant::now();
@@ -354,7 +359,7 @@ unsafe fn do_save(hwnd: HWND) {
                 WPARAM(0),
                 LPARAM(Box::into_raw(s) as isize),
             )
-            .ok();
+                .ok();
         }
     });
     let activity: crate::sync::ActivityFn = Arc::new(move |info| unsafe {
@@ -364,7 +369,7 @@ unsafe fn do_save(hwnd: HWND) {
             WPARAM(info.state as usize),
             LPARAM(Box::into_raw(Box::new((info.completed, info.total))) as isize),
         )
-        .ok();
+            .ok();
     });
     let auth_failed: crate::sync::AuthFailedFn = Arc::new(move || unsafe {
         PostMessageW(HWND(raw), WM_APP_AUTH_FAILED, WPARAM(0), LPARAM(0)).ok();
@@ -383,7 +388,7 @@ unsafe fn do_save(hwnd: HWND) {
                 WPARAM(0),
                 LPARAM(Box::into_raw(msg) as isize),
             )
-            .ok();
+                .ok();
             msgbox(hwnd, "Settings saved. Sync is now active.", "Save");
         }
         Err(e) => {
@@ -393,7 +398,6 @@ unsafe fn do_save(hwnd: HWND) {
     if !cfg.webdav_url.is_empty() && !cfg.username.is_empty() && !pass.is_empty() {
         ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
         set_status_dot_color(hwnd, C_AMBER);
-        set_status(hwnd, "\u{25cf}"); // connecting dot
         ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
         std::thread::spawn(move || {
             let ok = webdav::test_connection(&cfg, &pass).is_ok();
@@ -403,7 +407,7 @@ unsafe fn do_save(hwnd: HWND) {
                 WPARAM(if ok { 1 } else { 0 }),
                 LPARAM(0),
             )
-            .ok();
+                .ok();
         });
     }
 }
@@ -425,7 +429,7 @@ unsafe fn do_update(hwnd: HWND) {
             WPARAM(0),
             LPARAM(Box::into_raw(msg) as isize),
         )
-        .ok();
+            .ok();
         ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
         let raw = hwnd.0;
         std::thread::spawn(move || {
@@ -438,7 +442,7 @@ unsafe fn do_update(hwnd: HWND) {
                         WPARAM(0),
                         LPARAM(Box::into_raw(m) as isize),
                     )
-                    .ok();
+                        .ok();
                 }
             });
         });
@@ -506,7 +510,7 @@ unsafe fn layout_main(hwnd: HWND) {
         HDR_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
         None,
@@ -516,7 +520,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_STATUS_TEXT as i32),
         None,
@@ -526,7 +530,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32),
         None,
@@ -536,7 +540,7 @@ unsafe fn layout_main(hwnd: HWND) {
         SMALL_BTN_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += HDR_H + PAD;
 
     if !(*st).dividers.is_empty() {
@@ -556,7 +560,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += LBL_H + 4;
     SetWindowPos(
         GetDlgItem(hwnd, IDC_WATCH_FOLDER as i32),
@@ -567,7 +571,7 @@ unsafe fn layout_main(hwnd: HWND) {
         INP_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_BROWSE_LOCAL as i32),
         None,
@@ -577,7 +581,7 @@ unsafe fn layout_main(hwnd: HWND) {
         INP_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_OPEN_LOCAL_FOLDER as i32),
         None,
@@ -587,7 +591,7 @@ unsafe fn layout_main(hwnd: HWND) {
         INP_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += INP_H + GAP;
 
     SetWindowPos(
@@ -599,7 +603,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_DEST_CREATED as i32),
         None,
@@ -609,7 +613,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += LBL_H + 4;
     SetWindowPos(
         GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
@@ -620,7 +624,7 @@ unsafe fn layout_main(hwnd: HWND) {
         INP_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += INP_H + SECT;
 
     if (*st).dividers.len() > 1 {
@@ -636,7 +640,7 @@ unsafe fn layout_main(hwnd: HWND) {
         HDR_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += HDR_H + PAD;
     (*st).activity_list_top = y;
 
@@ -652,7 +656,7 @@ unsafe fn layout_main(hwnd: HWND) {
         new_lb_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += new_lb_h + (*st).post_list_gap;
 
     let sync_icon_w = 16i32;
@@ -677,7 +681,7 @@ unsafe fn layout_main(hwnd: HWND) {
         LBL_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
 
     let progress_x = status_x + status_w + sync_gap;
     let progress_w = INNER_W - (progress_x - M);
@@ -690,7 +694,7 @@ unsafe fn layout_main(hwnd: HWND) {
         progress_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     y += sync_row_h + (*st).post_sync_sect;
 
     let div_idx = (*st).divider_activity_idx;
@@ -718,7 +722,7 @@ unsafe fn layout_main(hwnd: HWND) {
         18,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_SYNC_REMOTE as i32),
         None,
@@ -728,7 +732,7 @@ unsafe fn layout_main(hwnd: HWND) {
         18,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_SAVE as i32),
         None,
@@ -738,7 +742,7 @@ unsafe fn layout_main(hwnd: HWND) {
         BTN_H,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
 
     y += row_h;
 
@@ -760,7 +764,7 @@ unsafe fn layout_main(hwnd: HWND) {
         footer_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_GITHUB as i32),
         None,
@@ -770,7 +774,7 @@ unsafe fn layout_main(hwnd: HWND) {
         footer_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     SetWindowPos(
         GetDlgItem(hwnd, IDC_UPDATE_LINK as i32),
         None,
@@ -780,7 +784,7 @@ unsafe fn layout_main(hwnd: HWND) {
         update_btn_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
     let author_h = 14i32;
     let author_y = footer_y;
     SetWindowPos(
@@ -792,8 +796,7 @@ unsafe fn layout_main(hwnd: HWND) {
         author_h,
         SWP_NOZORDER,
     )
-    .ok();
+        .ok();
 
     InvalidateRect(hwnd, None, TRUE);
 }
-

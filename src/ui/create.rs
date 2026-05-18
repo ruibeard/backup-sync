@@ -49,6 +49,9 @@ unsafe fn on_create(hwnd: HWND) {
         server_tooltip: HWND(0),
         server_tooltip_text: Vec::new(),
         status_dot_color: C_RED,
+        status_ok_icon: load_imageres_icon(106),
+        status_warn_icon: load_stock_icon(SIID_WARNING, false),
+        status_error_icon: load_stock_icon(SIID_ERROR, false),
         hfont,
         hfont_hdr,
         hfont_b,
@@ -58,7 +61,6 @@ unsafe fn on_create(hwnd: HWND) {
         br_sect: CreateSolidBrush(COLORREF(C_WIN_BG)),
         br_input: CreateSolidBrush(COLORREF(C_INPUT_BG)),
         focused_edit: 0,
-        pw_visible: false,
         dividers: Vec::new(),
         activity_list_top: 0,
         activity_list_h: 0,
@@ -258,14 +260,15 @@ unsafe fn build_ui(
             hwnd,
             hi,
             IDC_STATUS_TEXT,
-            "\u{25cf}",
+            "",
             status_x,
             y,
             status_w,
             LBL_H,
             hf_small,
-            SS_CENTER,
+            SS_ICON,
         );
+        set_status_icon(hwnd, C_RED);
         mkbtn_grey(
             hwnd,
             hi,
@@ -311,28 +314,26 @@ unsafe fn build_ui(
             inp_w,
             hf,
         );
-        mkbtn_grey(
+        let browse_btn = mkiconbtn(
             hwnd,
             hi,
             IDC_BROWSE_LOCAL,
-            "...",
             browse_x,
             y,
             34,
             INP_H,
-            hf,
         );
-        mkbtn_grey(
+        set_button_icon(browse_btn, load_stock_icon(SIID_FOLDER, false));
+        let open_btn = mkiconbtn(
             hwnd,
             hi,
             IDC_OPEN_LOCAL_FOLDER,
-            "",
             open_x,
             y,
             34,
             INP_H,
-            hf,
         );
+        set_button_icon(open_btn, load_stock_icon(SIID_FOLDEROPEN, true));
         y += INP_H + GAP;
 
         let destination_text = destination_display_text(
@@ -546,17 +547,16 @@ unsafe fn build_ui(
             hf_small,
         );
 
-        mkbtn(
+        let update_btn = mkiconbtn(
             hwnd,
             hi,
             IDC_UPDATE_LINK,
-            "",
             update_btn_x,
             update_btn_y,
             update_btn_w,
             update_btn_h,
-            hf_small,
         );
+        set_button_icon(update_btn, load_stock_icon(SIID_SOFTWARE, false));
         ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
 
         // Author credit row
@@ -771,6 +771,31 @@ unsafe fn mkbtn(
     );
     SendMessageW(c, WM_SETFONT, WPARAM(hf.0 as usize), LPARAM(1));
     c
+}
+
+unsafe fn mkiconbtn(
+    hwnd: HWND,
+    hi: HINSTANCE,
+    id: u16,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) -> HWND {
+    CreateWindowExW(
+        WINDOW_EX_STYLE::default(),
+        w!("BUTTON"),
+        w!(""),
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WINDOW_STYLE(BS_ICON as u32),
+        x,
+        y,
+        w,
+        h,
+        hwnd,
+        HMENU(id as isize),
+        hi,
+        None,
+    )
 }
 unsafe fn mkbtn_blue(
     hwnd: HWND,
@@ -1006,7 +1031,4 @@ unsafe fn update_server_tooltip(hwnd: HWND) {
         );
     }
 }
-
-const C_FOLDER_FILL: u32 = 0x00A5C8ED; // light tan/beige folder fill (BGR for #EDC8A5)
-const C_FOLDER_LINE: u32 = 0x00607890; // darker outline for folder (BGR for #907860)
 

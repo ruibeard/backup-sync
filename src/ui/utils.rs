@@ -1,11 +1,7 @@
 // ── Utilities ─────────────────────────────────────────────────────────────────
-unsafe fn set_status(hwnd: HWND, t: &str) {
-    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), &hstring(t));
-}
-
 unsafe fn set_status_dot_color(hwnd: HWND, color: u32) {
     stmut(hwnd).status_dot_color = color;
-    InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
+    set_status_icon(hwnd, color);
 }
 
 unsafe fn restore_pair_idle_controls(hwnd: HWND) {
@@ -37,7 +33,6 @@ unsafe fn restore_server_status_after_pair_cancel(hwnd: HWND) {
     };
     let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_SERVER_STATUS as i32), &hstring(status));
     set_status_dot_color(hwnd, color);
-    set_status(hwnd, "\u{25cf}");
     ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
 }
 
@@ -187,6 +182,74 @@ unsafe fn mkfont_underline(name: &str, pt: i32, weight: i32) -> HFONT {
 
 fn hstring(s: &str) -> HSTRING {
     HSTRING::from(s)
+}
+
+unsafe fn load_stock_icon(icon_id: SHSTOCKICONID, link_overlay: bool) -> HICON {
+    let mut info = SHSTOCKICONINFO {
+        cbSize: std::mem::size_of::<SHSTOCKICONINFO>() as u32,
+        ..Default::default()
+    };
+    let mut flags = SHGSI_ICON | SHGSI_SMALLICON;
+    if link_overlay {
+        flags |= SHGSI_LINKOVERLAY;
+    }
+    if SHGetStockIconInfo(icon_id, flags, &mut info).is_err() {
+        return HICON(0);
+    }
+    info.hIcon
+}
+
+unsafe fn set_button_icon(hwnd: HWND, icon: HICON) {
+    if icon.0 != 0 {
+        SendMessageW(
+            hwnd,
+            BM_SETIMAGE,
+            WPARAM(IMAGE_ICON as usize),
+            LPARAM(icon.0),
+        );
+    }
+}
+
+unsafe fn set_status_icon(hwnd: HWND, color: u32) {
+    let st = stmut(hwnd);
+    let icon = if color == C_GREEN {
+        st.status_ok_icon
+    } else if color == C_AMBER {
+        st.status_warn_icon
+    } else {
+        st.status_error_icon
+    };
+    if icon.0 != 0 {
+        SendMessageW(
+            GetDlgItem(hwnd, IDC_STATUS_TEXT as i32),
+            STM_SETIMAGE,
+            WPARAM(IMAGE_ICON as usize),
+            LPARAM(icon.0),
+        );
+    }
+}
+
+unsafe fn load_imageres_icon(index: i32) -> HICON {
+    let path = std::env::var("SystemRoot")
+        .map(|root| format!("{root}\\System32\\imageres.dll"))
+        .unwrap_or_else(|_| "C:\\Windows\\System32\\imageres.dll".to_string());
+    let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut large = [HICON(0)];
+    let mut small = [HICON(0)];
+    let count = ExtractIconExW(
+        PCWSTR(path_w.as_ptr()),
+        index,
+        Some(large.as_mut_ptr()),
+        Some(small.as_mut_ptr()),
+        1,
+    );
+    if count > 0 {
+        if small[0].0 != 0 {
+            return small[0];
+        }
+        return large[0];
+    }
+    HICON(0)
 }
 unsafe fn msgbox(hwnd: HWND, text: &str, title: &str) {
     MessageBoxW(

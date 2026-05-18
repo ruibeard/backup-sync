@@ -93,10 +93,6 @@ unsafe extern "system" fn wnd_proc(
             if st.is_null() {
                 return LRESULT(GetStockObject(WHITE_BRUSH).0 as isize);
             }
-            if id == IDC_STATUS_TEXT {
-                SetTextColor(hdc, COLORREF((*st).status_dot_color));
-                return LRESULT((*st).br_win.0 as isize);
-            }
             if id == IDC_SERVER_STATUS {
                 SetTextColor(hdc, COLORREF(C_LABEL));
                 return LRESULT((*st).br_win.0 as isize);

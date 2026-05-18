@@ -186,7 +186,6 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let conn_hwnd = GetDlgItem(hwnd, IDC_CONNECT as i32);
     if st.auth_failure_notified {
         set_status_dot_color(hwnd, C_RED);
-        set_status(hwnd, "\u{25cf}");
         let _ = SetWindowTextW(status_label_hwnd, &hstring("Pair again required"));
         restore_pair_idle_controls(hwnd);
         ShowWindow(status_hwnd, SW_SHOW);
@@ -194,7 +193,6 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     }
     if connected {
         set_status_dot_color(hwnd, C_GREEN);
-        set_status(hwnd, "\u{25cf}"); // Just the dot - green = connected
         let _ = SetWindowTextW(
             status_label_hwnd,
             &hstring(if paired { "Paired" } else { "Connected" }),
@@ -203,7 +201,6 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
         ShowWindow(status_hwnd, SW_SHOW);
     } else {
         set_status_dot_color(hwnd, C_RED);
-        set_status(hwnd, "\u{25cf}"); // Just the dot - red = not connected
         let _ = SetWindowTextW(
             status_label_hwnd,
             &hstring(if paired { "Paired" } else { "Offline" }),
@@ -244,7 +241,6 @@ unsafe fn on_app_auth_failed(hwnd: HWND) -> LRESULT {
     );
     restore_pair_idle_controls(hwnd);
     set_status_dot_color(hwnd, C_RED);
-    set_status(hwnd, "\u{25cf}");
     ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
     InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
     msgbox(
@@ -354,7 +350,6 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         &hstring("Paired"),
     );
     set_status_dot_color(hwnd, C_GREEN);
-    set_status(hwnd, "\u{25cf}");
     ShowWindow(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), SW_SHOW);
     InvalidateRect(GetDlgItem(hwnd, IDC_STATUS_TEXT as i32), None, TRUE);
     apply_server_readonly(hwnd);

@@ -32,9 +32,11 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::Shell::{
-    DefSubclassProc, ILFree, SHBrowseForFolderW, SHGetPathFromIDListW, SetWindowSubclass,
-    ShellExecuteW, BFFM_INITIALIZED, BFFM_SETSELECTIONW, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS,
-    BROWSEINFOW,
+    DefSubclassProc, ExtractIconExW, ILFree, SHBrowseForFolderW, SHGetPathFromIDListW,
+    SetWindowSubclass, ShellExecuteW, SHGetStockIconInfo, SHSTOCKICONID, SHSTOCKICONINFO,
+    BFFM_INITIALIZED, BFFM_SETSELECTIONW, BIF_NEWDIALOGSTYLE, BIF_RETURNONLYFSDIRS, BROWSEINFOW,
+    SHGSI_ICON, SHGSI_LINKOVERLAY, SHGSI_SMALLICON, SIID_ERROR, SIID_FOLDER, SIID_FOLDEROPEN,
+    SIID_SOFTWARE, SIID_WARNING,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -54,7 +56,6 @@ const C_GREY_BORDER: u32 = 0x00BBBBBB;
 const C_GREEN: u32 = 0x00287A28; // connected
 const C_AMBER: u32 = 0x0000A5FF; // waiting / pending approval
 const C_RED: u32 = 0x000000CC; // not connected
-const C_EYE: u32 = 0x00AAAAAA; // eye icon glyph colour
 const C_DIVIDER: u32 = 0x00E0E0E0; // section separator line
 
 // ── Control IDs ──────────────────────────────────────────────────────────────
@@ -73,7 +74,6 @@ const IDC_SYNC_STATUS: u16 = 117;
 const IDC_ACTIVITY_LIST: u16 = 114;
 const IDC_START_WINDOWS: u16 = 115;
 const IDC_SYNC_REMOTE: u16 = 116;
-// IDC_SHOW_PASSWORD (117) removed — eye icon is now drawn inside the edit subclass
 const IDC_SYNC_PROGRESS: u16 = 118;
 const IDC_REPO: u16 = 120;
 const IDC_DEST_CREATED: u16 = 121;
@@ -101,6 +101,10 @@ const SS_LEFT: u32 = 0x0000;
 const SS_CENTER: u32 = 0x0001;
 const SS_RIGHT: u32 = 0x0002;
 const SS_NOTIFY: u32 = 0x0100;
+const SS_ICON: u32 = 0x0003;
+const IMAGE_ICON: u32 = 1;
+const STM_SETIMAGE: u32 = 0x0172;
+const BM_SETIMAGE: u32 = 0x00F7;
 
 pub const CLASS_NAME: PCWSTR = w!("BackupSyncToolWnd");
 const REPO_URL: &str = "https://github.com/ruibeard/backup-sync-tool";
@@ -128,8 +132,6 @@ const PAIR_BTN_W: i32 = 82;
 const SERVER_STATUS_W: i32 = 170;
 const MIN_ACTIVITY_LIST_H: i32 = 96;
 const INNER_W: i32 = WIN_W - M * 2; // usable inner width
-                                    // Eye icon toggle zone inside the password edit right padding
-const EYE_ZONE_W: i32 = 26; // pixels from right edge of edit that count as eye click
 
 // ── Window state ──────────────────────────────────────────────────────────────
 struct WndState {
@@ -151,6 +153,9 @@ struct WndState {
     server_tooltip: HWND,
     server_tooltip_text: Vec<u16>,
     status_dot_color: u32,
+    status_ok_icon: HICON,
+    status_warn_icon: HICON,
+    status_error_icon: HICON,
     hfont: HFONT,
     hfont_hdr: HFONT,
     hfont_b: HFONT,
@@ -160,8 +165,6 @@ struct WndState {
     br_sect: HBRUSH,
     br_input: HBRUSH,
     focused_edit: u16,
-    /// Password field: is it currently showing plain text?
-    pw_visible: bool,
     /// Divider y-positions for WM_PAINT
     dividers: Vec<i32>,
     /// Layout: y-position where the activity listbox starts
