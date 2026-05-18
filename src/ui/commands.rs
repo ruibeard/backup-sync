@@ -28,6 +28,7 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
             DestroyWindow(hwnd).ok();
         }
         IDC_BROWSE_LOCAL => browse_local(hwnd),
+        IDC_OPEN_LOCAL_FOLDER => do_open_local_folder(hwnd),
         IDC_CONNECT => do_connect(hwnd),
         IDC_PAIR_DEVICE => do_pair_device(hwnd),
         IDC_SAVE => do_save(hwnd),
@@ -78,6 +79,20 @@ unsafe fn browse_local(hwnd: HWND) {
         let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_WATCH_FOLDER as i32), &hstring(&s));
     }
     ILFree(Some(pidl));
+}
+
+unsafe fn do_open_local_folder(hwnd: HWND) {
+    let folder = gettext(hwnd, IDC_WATCH_FOLDER);
+    let folder = folder.trim();
+    if folder.is_empty() {
+        msgbox(hwnd, "Origin folder is empty.", "Open Folder");
+        return;
+    }
+    if !Path::new(folder).is_dir() {
+        msgbox(hwnd, "Origin folder does not exist.", "Open Folder");
+        return;
+    }
+    let _ = ShellExecuteW(hwnd, w!("open"), &hstring(folder), None, None, SW_SHOWNORMAL);
 }
 
 unsafe extern "system" fn browse_local_init_cb(
@@ -528,8 +543,9 @@ unsafe fn layout_main(hwnd: HWND) {
         (&mut (*st).dividers)[0] = y - SECT / 2;
     }
 
-    let browse_x = M + INNER_W - BROWSE_W;
-    let inp_w = INNER_W - BROWSE_W - PAD;
+    let open_x = M + INNER_W - BROWSE_W;
+    let browse_x = open_x - PAD - BROWSE_W;
+    let inp_w = INNER_W - FOLDER_ACTIONS_W - PAD;
 
     SetWindowPos(
         GetDlgItem(hwnd, IDC_ORIGIN_LABEL as i32),
@@ -556,6 +572,16 @@ unsafe fn layout_main(hwnd: HWND) {
         GetDlgItem(hwnd, IDC_BROWSE_LOCAL as i32),
         None,
         browse_x,
+        y,
+        34,
+        INP_H,
+        SWP_NOZORDER,
+    )
+    .ok();
+    SetWindowPos(
+        GetDlgItem(hwnd, IDC_OPEN_LOCAL_FOLDER as i32),
+        None,
+        open_x,
         y,
         34,
         INP_H,

@@ -25,6 +25,7 @@ Non-negotiables:
 
 - Native Windows tray app.
 - Watches one local folder recursively.
+- Local folder row includes quick actions to choose the folder and open it in Windows Explorer.
 - Uploads new and changed files to WebDAV.
 - Streams uploads from disk.
 - Bounded parallel uploads with `parallel_uploads`.

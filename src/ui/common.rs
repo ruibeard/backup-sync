@@ -60,6 +60,7 @@ const C_DIVIDER: u32 = 0x00E0E0E0; // section separator line
 // ── Control IDs ──────────────────────────────────────────────────────────────
 const IDC_WATCH_FOLDER: u16 = 101;
 const IDC_BROWSE_LOCAL: u16 = 102;
+const IDC_OPEN_LOCAL_FOLDER: u16 = 124;
 const IDC_URL: u16 = 103;
 const IDC_USERNAME: u16 = 104;
 const IDC_PASSWORD: u16 = 105;
@@ -122,6 +123,7 @@ const SMALL_BTN_H: i32 = 24; // compact secondary button height
 const HDR_H: i32 = 20; // section heading height
 const LBL_H: i32 = 18; // label text height
 const BROWSE_W: i32 = 34; // folder icon button width
+const FOLDER_ACTIONS_W: i32 = BROWSE_W * 2 + PAD;
 const PAIR_BTN_W: i32 = 82;
 const SERVER_STATUS_W: i32 = 170;
 const MIN_ACTIVITY_LIST_H: i32 = 96;

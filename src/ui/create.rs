@@ -284,8 +284,9 @@ unsafe fn build_ui(
 
     // ── FOLDERS ───────────────────────────────────────────────────────────────
     {
-        let browse_x = M + INNER_W - BROWSE_W;
-        let inp_w = INNER_W - BROWSE_W - PAD;
+        let open_x = M + INNER_W - BROWSE_W;
+        let browse_x = open_x - PAD - BROWSE_W;
+        let inp_w = INNER_W - FOLDER_ACTIONS_W - PAD;
 
         mkstatic(
             hwnd,
@@ -316,6 +317,17 @@ unsafe fn build_ui(
             IDC_BROWSE_LOCAL,
             "...",
             browse_x,
+            y,
+            34,
+            INP_H,
+            hf,
+        );
+        mkbtn_grey(
+            hwnd,
+            hi,
+            IDC_OPEN_LOCAL_FOLDER,
+            "",
+            open_x,
             y,
             34,
             INP_H,

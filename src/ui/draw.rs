@@ -1,7 +1,8 @@
 // ── WM_DRAWITEM ───────────────────────────────────────────────────────────────
 const BLUE_IDS: &[u16] = &[IDC_SAVE, IDC_UPDATE_LINK];
-const BORDERLESS_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_GITHUB];
+const BORDERLESS_IDS: &[u16] = &[IDC_BROWSE_LOCAL, IDC_OPEN_LOCAL_FOLDER, IDC_GITHUB];
 const FOLDER_IDS: &[u16] = &[IDC_BROWSE_LOCAL];
+const SHORTCUT_IDS: &[u16] = &[IDC_OPEN_LOCAL_FOLDER];
 const UPDATE_IDS: &[u16] = &[IDC_UPDATE_LINK];
 const GITHUB_IDS: &[u16] = &[IDC_GITHUB];
 
@@ -44,12 +45,15 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
 
     let len = GetWindowTextLengthW(di.hwndItem);
     let is_folder = FOLDER_IDS.contains(&id);
+    let is_shortcut = SHORTCUT_IDS.contains(&id);
     let is_update = UPDATE_IDS.contains(&id);
     let is_github = GITHUB_IDS.contains(&id);
 
     if is_folder {
         // Draw a small folder icon via GDI
         draw_folder_icon(hdc, &rc, fg);
+    } else if is_shortcut {
+        draw_shortcut_icon(hdc, &rc, fg);
     } else if is_update {
         // Draw a download arrow icon via GDI
         draw_download_icon(hdc, &rc, fg);
@@ -143,6 +147,35 @@ unsafe fn draw_download_icon(hdc: HDC, rc: &RECT, clr: u32) {
 
     SelectObject(hdc, op);
     DeleteObject(hp);
+}
+
+unsafe fn draw_shortcut_icon(hdc: HDC, rc: &RECT, clr: u32) {
+    let cx = (rc.left + rc.right) / 2;
+    let cy = (rc.top + rc.bottom) / 2;
+    let x0 = cx - 7;
+    let y0 = cy - 7;
+    let x1 = cx + 7;
+    let y1 = cy + 7;
+
+    let hp = CreatePen(PS_SOLID, 2, COLORREF(clr));
+    let op = SelectObject(hdc, hp);
+
+    MoveToEx(hdc, x0 + 2, y1 - 2, None);
+    LineTo(hdc, x1 - 2, y0 + 2);
+    MoveToEx(hdc, x1 - 7, y0 + 2, None);
+    LineTo(hdc, x1 - 2, y0 + 2);
+    LineTo(hdc, x1 - 2, y0 + 7);
+
+    SelectObject(hdc, op);
+    DeleteObject(hp);
+
+    let hp_box = CreatePen(PS_SOLID, 1, COLORREF(clr));
+    let op_box = SelectObject(hdc, hp_box);
+    let ob_box = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+    Rectangle(hdc, x0, y0 + 5, x0 + 8, y1);
+    SelectObject(hdc, op_box);
+    SelectObject(hdc, ob_box);
+    DeleteObject(hp_box);
 }
 
 unsafe fn draw_github_icon(hdc: HDC, rc: &RECT, hwnd_item: HWND) {
