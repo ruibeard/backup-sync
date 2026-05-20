@@ -31,7 +31,6 @@ use windows::Win32::Graphics::Gdi as gdi;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
 use windows::Win32::UI::WindowsAndMessaging as wam;
 use windows::Win32::UI::Shell::{
     DefSubclassProc, ILFree, SHBrowseForFolderW, SHGetPathFromIDListW,
@@ -272,11 +271,7 @@ const C_DIVIDER: u32 = 0x00E0E0E0; // section separator line
 const IDC_WATCH_FOLDER: u16 = 101;
 const IDC_BROWSE_LOCAL: u16 = 102;
 const IDC_OPEN_LOCAL_FOLDER: u16 = 124;
-const IDC_URL: u16 = 103;
-const IDC_USERNAME: u16 = 104;
-const IDC_PASSWORD: u16 = 105;
 const IDC_REMOTE_FOLDER: u16 = 106;
-const IDC_CONNECT: u16 = 108;
 const IDC_SERVER_STATUS: u16 = 123;
 const IDC_SYNC_STATUS: u16 = 117;
 const IDC_ACTIVITY_LIST: u16 = 114;
@@ -284,7 +279,6 @@ const IDC_START_WINDOWS: u16 = 115;
 const IDC_SYNC_REMOTE: u16 = 116;
 const IDC_SYNC_PROGRESS: u16 = 118;
 const IDC_REPO: u16 = 120;
-const IDC_DEST_CREATED: u16 = 121;
 const IDC_UPDATE_LINK: u16 = 122;
 const IDC_SERVER_HDR: u16 = 207;
 const IDC_GITHUB: u16 = 211;
@@ -337,6 +331,7 @@ const LBL_H: i32 = 18; // label text height
 const ACTION_BTN_W: i32 = 76; // Open / Browse / Connect / Reconnect / footer buttons
 const ACTION_BTN_H: i32 = INP_H;
 const GITHUB_BTN_SIZE: i32 = ACTION_BTN_H; // square icon hit target in footer
+const META_ICON_GAP: i32 = 4; // gap between version link and GitHub icon
 const FOLDER_ACTIONS_W: i32 = ACTION_BTN_W * 2 + PAD;
 const CONTENT_TOP_PAD: i32 = 14; // mockup .body padding above status strip
 const STATUS_STRIP_H: i32 = 38;
@@ -401,8 +396,6 @@ struct WndState {
     sync_last_failed: usize,
     sync_started_at: Option<std::time::Instant>,
     sync_anim_frame: usize,
-    sync_icon: HICON,
-    sync_icon_rect: RECT,
     remote_folder_from_xd: bool,
     detected_customer: Option<String>,
     server_tooltip: HWND,
@@ -411,8 +404,6 @@ struct WndState {
     server_status_rect: RECT,
     status_strip_rect: RECT,
     status_strip_display: String,
-    /// Optional second segment on the status strip (usually empty; connection-only strip).
-    status_strip_secondary: String,
     activity_list_rect: RECT,
     dest_path_rect: RECT,
     sync_footer_rect: RECT,
@@ -425,11 +416,9 @@ struct WndState {
     hfont_btn: HFONT,
     hfont_link: HFONT,
     br_win: HBRUSH,
-    br_status_strip: HBRUSH,
     br_path_box: HBRUSH,
     br_footer_idle: HBRUSH,
     br_footer_busy: HBRUSH,
-    br_sect: HBRUSH,
     br_input: HBRUSH,
     focused_edit: u16,
     /// Divider y-positions for WM_PAINT

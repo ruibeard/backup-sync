@@ -46,15 +46,10 @@ fn sync_is_busy(st: &WndState) -> bool {
         || st.sync_status_state == crate::sync::ActivityState::Syncing as usize
 }
 
-unsafe fn set_status_strip_display(hwnd: HWND, primary: &str, secondary: Option<&str>) {
-    let st = stmut(hwnd);
-    st.status_strip_display = primary.to_string();
-    st.status_strip_secondary = secondary.unwrap_or("").to_string();
-    InvalidateRect(hwnd, Some(&st.status_strip_rect), TRUE);
-}
-
 unsafe fn set_status_strip_text(hwnd: HWND, text: &str) {
-    set_status_strip_display(hwnd, text, None);
+    let st = stmut(hwnd);
+    st.status_strip_display = text.to_string();
+    InvalidateRect(hwnd, Some(&st.status_strip_rect), TRUE);
 }
 
 unsafe fn set_status_strip_connection(hwnd: HWND) {

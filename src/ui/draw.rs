@@ -1,7 +1,6 @@
 // ── WM_DRAWITEM ───────────────────────────────────────────────────────────────
 const BLUE_IDS: &[u16] = &[IDC_UPDATE_LINK];
 const BORDERLESS_IDS: &[u16] = &[IDC_GITHUB];
-const GITHUB_IDS: &[u16] = &[IDC_GITHUB];
 
 unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     let di = &*(lp.0 as *const DRAWITEMSTRUCT);
@@ -48,9 +47,7 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     }
 
     let len = GetWindowTextLengthW(di.hwndItem);
-    let is_github = GITHUB_IDS.contains(&id);
-
-    if is_github {
+    if id == IDC_GITHUB {
         draw_github_icon(hdc, &rc, di.hwndItem);
     } else if len > 0 {
         let mut buf = vec![0u16; (len + 1) as usize];

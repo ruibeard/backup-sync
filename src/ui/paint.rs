@@ -20,10 +20,8 @@ unsafe fn draw_status_strip_text(
     sr: &RECT,
     dot_r: &RECT,
     primary: &str,
-    secondary: &str,
     hf: HFONT,
     hf_b: HFONT,
-    hf_small: HFONT,
 ) {
     let mut tr = *sr;
     tr.left = dot_r.right + 8;
@@ -56,20 +54,6 @@ unsafe fn draw_status_strip_text(
         SelectObject(hdc, prev);
         width
     };
-
-    if !secondary.is_empty() {
-        let head_w_px = draw_segment(hdc, &mut tr, primary.trim(), hf_b, C_LABEL);
-        tr.left += head_w_px;
-        let _ = draw_segment(
-            hdc,
-            &mut tr,
-            &format!(" \u{00B7} {secondary}"),
-            hf_small,
-            C_STATUS_MUTED,
-        );
-        SelectObject(hdc, of);
-        return;
-    }
 
     let (head, tail) = if let Some(idx) = primary.find('\u{00B7}') {
         let (h, t) = primary.split_at(idx);
@@ -105,10 +89,8 @@ unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
 
     let accent_color = (*st).status_dot_color;
     let status_text = (*st).status_strip_display.clone();
-    let status_secondary = (*st).status_strip_secondary.clone();
     let hf = (*st).hfont;
     let hf_b = (*st).hfont_b;
-    let hf_small = (*st).hfont_small;
 
     let sr = (*st).status_strip_rect;
     if sr.right > sr.left && sr.bottom > sr.top {
@@ -131,16 +113,7 @@ unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
         }
 
         if !status_text.is_empty() {
-            draw_status_strip_text(
-                hdc,
-                &sr,
-                &dot_r,
-                &status_text,
-                &status_secondary,
-                hf,
-                hf_b,
-                hf_small,
-            );
+            draw_status_strip_text(hdc, &sr, &dot_r, &status_text, hf, hf_b);
         }
     }
 

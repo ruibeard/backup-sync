@@ -123,7 +123,6 @@ unsafe extern "system" fn wnd_proc(
                 return LRESULT(br.0 as isize);
             }
             let text_clr = match id {
-                IDC_DEST_CREATED => C_GREEN,
                 IDC_REPO => C_BLUE,
                 IDC_AUTHOR => C_LABEL,
                 IDC_SERVER_HDR | IDC_ACTIVITY_HDR => 0x00888888,
@@ -227,11 +226,9 @@ unsafe extern "system" fn wnd_proc(
             if !st.is_null() {
                 tray::remove_tray_icon(hwnd);
                 DeleteObject((*st).br_win);
-                DeleteObject((*st).br_status_strip);
                 DeleteObject((*st).br_path_box);
                 DeleteObject((*st).br_footer_idle);
                 DeleteObject((*st).br_footer_busy);
-                DeleteObject((*st).br_sect);
                 DeleteObject((*st).br_input);
                 DeleteObject((*st).hfont);
                 DeleteObject((*st).hfont_hdr);

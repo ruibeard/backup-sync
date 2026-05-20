@@ -39,7 +39,6 @@ unsafe fn on_command(hwnd: HWND, wp: WPARAM) -> LRESULT {
         }
         IDC_BROWSE_LOCAL => browse_local(hwnd),
         IDC_OPEN_LOCAL_FOLDER => do_open_local_folder(hwnd),
-        IDC_CONNECT => do_connect(hwnd),
         IDC_UPDATE_LINK => do_update(hwnd),
         IDC_GITHUB => do_open_repo(hwnd),
         IDC_PAIR_DEVICE => do_pair_device(hwnd),
@@ -128,32 +127,6 @@ unsafe extern "system" fn browse_local_init_cb(
         SendMessageW(hwnd, BFFM_SETSELECTIONW, WPARAM(1), data);
     }
     0
-}
-
-unsafe fn do_connect(hwnd: HWND) {
-    let st = stmut(hwnd);
-    read_ctrls(hwnd, st);
-    let cfg = st.config.clone();
-    if let Err(err) = validate_webdav_url(&cfg.webdav_url) {
-        notify_user_status(hwnd, "Invalid server URL", C_RED, &err);
-        return;
-    }
-    let pass = st.password_plain.clone();
-    ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
-    // Show amber/yellow dot while connecting.
-    set_status_dot_color(hwnd, C_AMBER);
-    set_status_strip_text(hwnd, "Connecting");
-    let raw = hwnd.0 as isize;
-    std::thread::spawn(move || {
-        let ok = webdav::test_connection(&cfg, &pass).is_ok();
-        PostMessageW(
-            HWND(raw as *mut _),
-            WM_APP_CONNECTED,
-            WPARAM(if ok { 1 } else { 0 }),
-            LPARAM(0),
-        )
-            .ok();
-    });
 }
 
 unsafe fn do_pair_device(hwnd: HWND) {
@@ -322,18 +295,6 @@ unsafe fn persist_settings(hwnd: HWND, notify_ok: bool) {
         st.password_plain = locked_password;
         st.config.remote_folder = locked_remote_folder;
         let _ = SetWindowTextW(
-            GetDlgItem(hwnd, IDC_URL as i32),
-            &hstring(&st.config.webdav_url),
-        );
-        let _ = SetWindowTextW(
-            GetDlgItem(hwnd, IDC_USERNAME as i32),
-            &hstring(&st.config.username),
-        );
-        let _ = SetWindowTextW(
-            GetDlgItem(hwnd, IDC_PASSWORD as i32),
-            &hstring(&st.password_plain),
-        );
-        let _ = SetWindowTextW(
             GetDlgItem(hwnd, IDC_REMOTE_FOLDER as i32),
             &hstring(&st.config.remote_folder),
         );
@@ -381,7 +342,6 @@ unsafe fn persist_settings(hwnd: HWND, notify_ok: bool) {
         Err(e) => notify_user_status(hwnd, "Sync error", C_RED, &e),
     }
     if !cfg.webdav_url.is_empty() && !cfg.username.is_empty() && !pass.is_empty() {
-        ShowWindow(GetDlgItem(hwnd, IDC_CONNECT as i32), SW_HIDE);
         set_status_dot_color(hwnd, C_AMBER);
         std::thread::spawn(move || {
             let ok = webdav::test_connection(&cfg, &pass).is_ok();
@@ -613,16 +573,6 @@ unsafe fn layout_main(hwnd: HWND) {
         SWP_NOZORDER,
     )
         .ok();
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_DEST_CREATED as i32),
-        None,
-        M + 118,
-        y,
-        120,
-        LBL_H,
-        SWP_NOZORDER,
-    )
-        .ok();
     y += LBL_H + 4;
     (*st).dest_path_rect = RECT {
         left: M,
@@ -767,54 +717,8 @@ unsafe fn layout_main(hwnd: HWND) {
     y += row_h;
 
     let footer_y = y + 2;
-    let footer_btn_y = footer_y + (LBL_H - ACTION_BTN_H) / 2;
-    let version_w = 72i32;
-    let author_w = 100i32;
-    let version_x = M;
-    let github_btn_x = version_x + version_w + PAD;
-    let author_x = M + INNER_W - author_w;
-    let update_btn_x = author_x - ACTION_BTN_W - PAD;
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_REPO as i32),
-        None,
-        version_x,
-        footer_y,
-        version_w,
-        LBL_H,
-        SWP_NOZORDER,
-    )
-        .ok();
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_GITHUB as i32),
-        None,
-        github_btn_x,
-        footer_btn_y,
-        GITHUB_BTN_SIZE,
-        GITHUB_BTN_SIZE,
-        SWP_NOZORDER,
-    )
-        .ok();
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_UPDATE_LINK as i32),
-        None,
-        update_btn_x,
-        footer_btn_y,
-        ACTION_BTN_W,
-        ACTION_BTN_H,
-        SWP_NOZORDER,
-    )
-        .ok();
-    let author_h = 14i32;
-    SetWindowPos(
-        GetDlgItem(hwnd, IDC_AUTHOR as i32),
-        None,
-        author_x,
-        footer_y,
-        author_w,
-        author_h,
-        SWP_NOZORDER,
-    )
-        .ok();
+    let meta = footer_meta_layout(footer_y, (*st).hfont_link);
+    position_footer_meta(hwnd, &meta);
 
     InvalidateRect(hwnd, None, TRUE);
 }

@@ -41,8 +41,6 @@ unsafe fn on_create(hwnd: HWND) {
         sync_last_failed: 0,
         sync_started_at: None,
         sync_anim_frame: 0,
-        sync_icon: HICON(std::ptr::null_mut()),
-        sync_icon_rect: RECT::default(),
         remote_folder_from_xd,
         detected_customer: None,
         server_tooltip: HWND(std::ptr::null_mut()),
@@ -51,7 +49,6 @@ unsafe fn on_create(hwnd: HWND) {
         server_status_rect: RECT::default(),
         status_strip_rect: RECT::default(),
         status_strip_display: String::new(),
-        status_strip_secondary: String::new(),
         activity_list_rect: RECT::default(),
         dest_path_rect: RECT::default(),
         sync_footer_rect: RECT::default(),
@@ -64,11 +61,9 @@ unsafe fn on_create(hwnd: HWND) {
         hfont_btn,
         hfont_link,
         br_win: CreateSolidBrush(COLORREF(C_WIN_BG)),
-        br_status_strip: CreateSolidBrush(COLORREF(C_STATUS_BG)),
         br_path_box: CreateSolidBrush(COLORREF(C_DEST_PATH_BG)),
         br_footer_idle: CreateSolidBrush(COLORREF(C_FOOTER_IDLE_BG)),
         br_footer_busy: CreateSolidBrush(COLORREF(C_STATUS_BG)),
-        br_sect: CreateSolidBrush(COLORREF(C_WIN_BG)),
         br_input: CreateSolidBrush(COLORREF(C_INPUT_BG)),
         focused_edit: 0,
         dividers: Vec::new(),
@@ -94,7 +89,6 @@ unsafe fn on_create(hwnd: HWND) {
         hwnd,
         hi,
         &cfg,
-        &pass,
         hfont,
         hfont_hdr,
         hfont_b,
@@ -184,7 +178,6 @@ unsafe fn build_ui(
     hwnd: HWND,
     hi: HINSTANCE,
     cfg: &Config,
-    pass: &str,
     hf: HFONT,
     hf_hdr: HFONT,
     hf_b: HFONT,
@@ -213,7 +206,6 @@ unsafe fn build_ui(
             "Not paired".to_string()
         };
         st.status_strip_display = status_initial;
-        st.status_strip_secondary.clear();
         mkstatic(
             hwnd,
             hi,
@@ -352,18 +344,6 @@ unsafe fn build_ui(
             LBL_H,
             hf_small,
         );
-        mkstatic(
-            hwnd,
-            hi,
-            IDC_DEST_CREATED,
-            "Created on server",
-            M + 118,
-            y,
-            120,
-            LBL_H,
-            hf_small,
-        );
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
         y += LBL_H + 4;
         st.dest_path_rect = RECT {
             left: M,
@@ -521,13 +501,7 @@ unsafe fn build_ui(
         y += row_h;
 
         let footer_y = y + 2;
-        let footer_btn_y = footer_y + (LBL_H - ACTION_BTN_H) / 2;
-        let version_w = 72i32;
-        let author_w = 100i32;
-        let version_x = M;
-        let github_btn_x = version_x + version_w + PAD;
-        let author_x = M + INNER_W - author_w;
-        let update_btn_x = author_x - ACTION_BTN_W - PAD;
+        let meta = footer_meta_layout(footer_y, hf_link);
         let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
 
         mklink(
@@ -535,9 +509,9 @@ unsafe fn build_ui(
             hi,
             IDC_REPO,
             ver_label,
-            version_x,
-            footer_y,
-            version_w,
+            meta.version_x,
+            meta.footer_y,
+            meta.version_w,
             LBL_H,
             hf_link,
         );
@@ -547,8 +521,8 @@ unsafe fn build_ui(
             hi,
             IDC_GITHUB,
             "",
-            github_btn_x,
-            footer_btn_y,
+            meta.github_x,
+            meta.footer_btn_y,
             GITHUB_BTN_SIZE,
             GITHUB_BTN_SIZE,
             hf_btn,
@@ -559,28 +533,27 @@ unsafe fn build_ui(
             hi,
             IDC_UPDATE_LINK,
             "Update",
-            update_btn_x,
-            footer_btn_y,
+            meta.update_x,
+            meta.footer_btn_y,
             ACTION_BTN_W,
             ACTION_BTN_H,
             hf_btn,
         );
         ShowWindow(GetDlgItem(hwnd, IDC_UPDATE_LINK as i32), SW_HIDE);
 
-        let author_h = LBL_H - 2;
         mkstatic_align(
             hwnd,
             hi,
             IDC_AUTHOR,
             "Rui Almeida",
-            author_x,
-            footer_y,
-            author_w,
-            author_h,
+            meta.author_x,
+            meta.footer_y,
+            meta.author_w,
+            LBL_H - 2,
             hf_link,
             SS_RIGHT | SS_NOTIFY,
         );
-        st.bottom_bar_h = row_h + author_h + 4 + M;
+        st.bottom_bar_h = row_h + (LBL_H - 2) + 4 + M;
     }
 
     // Size window to fit content
@@ -937,6 +910,98 @@ unsafe fn install_server_tooltip(hwnd: HWND, hi: HINSTANCE) {
             LPARAM((&mut ti as *mut TTTOOLINFOW) as isize),
         );
     }
+}
+
+struct FooterMetaLayout {
+    version_x: i32,
+    version_w: i32,
+    github_x: i32,
+    update_x: i32,
+    author_x: i32,
+    author_w: i32,
+    footer_y: i32,
+    footer_btn_y: i32,
+}
+
+unsafe fn font_text_width(hf: HFONT, text: &str) -> i32 {
+    let hdc = GetDC(None);
+    if hdc.0.is_null() {
+        return 72;
+    }
+    let prev = SelectObject(hdc, hf);
+    let wide: Vec<u16> = text.encode_utf16().collect();
+    let mut sz = SIZE::default();
+    let _ = gdi::GetTextExtentPoint32W(hdc, &wide, &mut sz);
+    SelectObject(hdc, prev);
+    ReleaseDC(None, hdc);
+    sz.cx.max(0) + 2
+}
+
+unsafe fn footer_meta_layout(footer_y: i32, hf_link: HFONT) -> FooterMetaLayout {
+    let version_x = M;
+    let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
+    let version_w = font_text_width(hf_link, ver_label);
+    let github_x = version_x + version_w + META_ICON_GAP;
+    let author_w = 100;
+    let author_x = M + INNER_W - author_w;
+    let update_x = github_x + GITHUB_BTN_SIZE + META_ICON_GAP;
+    let footer_btn_y = footer_y + (LBL_H - ACTION_BTN_H) / 2;
+    FooterMetaLayout {
+        version_x,
+        version_w,
+        github_x,
+        update_x,
+        author_x,
+        author_w,
+        footer_y,
+        footer_btn_y,
+    }
+}
+
+unsafe fn position_footer_meta(hwnd: HWND, layout: &FooterMetaLayout) {
+    let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
+    SetWindowPos(
+        GetDlgItem(hwnd, IDC_REPO as i32),
+        None,
+        layout.version_x,
+        layout.footer_y,
+        layout.version_w,
+        LBL_H,
+        SWP_NOZORDER,
+    )
+        .ok();
+    SetWindowPos(
+        GetDlgItem(hwnd, IDC_GITHUB as i32),
+        None,
+        layout.github_x,
+        layout.footer_btn_y,
+        GITHUB_BTN_SIZE,
+        GITHUB_BTN_SIZE,
+        SWP_NOZORDER,
+    )
+        .ok();
+    SetWindowPos(
+        GetDlgItem(hwnd, IDC_UPDATE_LINK as i32),
+        None,
+        layout.update_x,
+        layout.footer_btn_y,
+        ACTION_BTN_W,
+        ACTION_BTN_H,
+        SWP_NOZORDER,
+    )
+        .ok();
+    let author_h = LBL_H - 2;
+    SetWindowPos(
+        GetDlgItem(hwnd, IDC_AUTHOR as i32),
+        None,
+        layout.author_x,
+        layout.footer_y,
+        layout.author_w,
+        author_h,
+        SWP_NOZORDER,
+    )
+        .ok();
+    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_REPO as i32), &hstring(ver_label));
 }
 
 fn server_tooltip_text(cfg: &Config) -> String {

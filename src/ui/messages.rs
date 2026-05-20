@@ -146,7 +146,6 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let connected = wp.0 == 1;
     let st = stmut(hwnd);
     st.connected = connected;
-    let conn_hwnd = GetDlgItem(hwnd, IDC_CONNECT as i32);
     if st.auth_failure_notified {
         set_status_dot_color(hwnd, C_RED);
         set_status_strip_text(hwnd, "Reconnect required");
@@ -154,12 +153,6 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
         return LRESULT(0);
     }
     update_status_strip_from_connection(hwnd);
-    if connected {
-        ShowWindow(conn_hwnd, SW_HIDE);
-    } else {
-        EnableWindow(conn_hwnd, true);
-        ShowWindow(conn_hwnd, SW_HIDE);
-    }
     LRESULT(0)
 }
 
@@ -231,20 +224,11 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
     }
     st.config.webdav_url = pair.webdav_url.clone();
-    let _ = SetWindowTextW(GetDlgItem(hwnd, IDC_URL as i32), &hstring(&pair.webdav_url));
     st.config.username = pair.username.clone();
-    let _ = SetWindowTextW(
-        GetDlgItem(hwnd, IDC_USERNAME as i32),
-        &hstring(&pair.username),
-    );
     match secret::encrypt(&pair.password) {
         Ok(enc) => {
             st.config.password_enc = enc;
             st.password_plain = pair.password.clone();
-            let _ = SetWindowTextW(
-                GetDlgItem(hwnd, IDC_PASSWORD as i32),
-                &hstring(&pair.password),
-            );
         }
         Err(e) => {
             notify_user_status(
@@ -365,7 +349,6 @@ unsafe fn on_app_remote_folder(hwnd: HWND, lp: LPARAM) -> LRESULT {
             &hstring(&display),
         );
         update_server_tooltip(hwnd);
-        ShowWindow(GetDlgItem(hwnd, IDC_DEST_CREATED as i32), SW_HIDE);
     }
     LRESULT(0)
 }
