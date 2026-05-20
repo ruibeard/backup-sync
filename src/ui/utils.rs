@@ -2,20 +2,19 @@
 unsafe fn set_status_dot_color(hwnd: HWND, color: u32) {
     let st = stmut(hwnd);
     st.status_dot_color = color;
-    InvalidateRect(hwnd, Some(&st.ribbon_rect), TRUE);
+    InvalidateRect(hwnd, Some(&st.status_strip_rect), TRUE);
 }
 
 unsafe fn restore_pair_idle_controls(hwnd: HWND) {
     let st = stmut(hwnd);
-    let label = if st.auth_failure_notified {
+    let label = if st.auth_failure_notified || is_paired(&st.config) {
         "Pair again"
     } else {
         "Pair"
     };
     let pair_hwnd = GetDlgItem(hwnd, IDC_PAIR_DEVICE as i32);
     let _ = SetWindowTextW(pair_hwnd, &hstring(label));
-    EnableWindow(pair_hwnd, true);
-    ShowWindow(GetDlgItem(hwnd, IDC_SAVE as i32), SW_SHOW);
+    ShowWindow(pair_hwnd, SW_SHOW);
 }
 
 unsafe fn restore_server_status_after_pair_cancel(hwnd: HWND) {
@@ -24,9 +23,9 @@ unsafe fn restore_server_status_after_pair_cancel(hwnd: HWND) {
         "Pair again required"
     } else if is_paired(&st.config) {
         if st.connected {
-            "Paired \u{2022} Online"
+            "All synced \u{00B7} paired with server"
         } else {
-            "Paired \u{2022} Offline"
+            "Offline"
         }
     } else {
         "Pair cancelled"
@@ -54,14 +53,47 @@ fn sync_is_busy(st: &WndState) -> bool {
         || st.sync_status_state == crate::sync::ActivityState::Syncing as usize
 }
 
-unsafe fn set_ribbon_status_text(hwnd: HWND, text: &str) {
+unsafe fn set_status_strip_text(hwnd: HWND, text: &str) {
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_SERVER_STATUS as i32),
         &hstring(text),
     );
 }
 
-unsafe fn update_ribbon_after_sync(hwnd: HWND, state: usize, progress: (usize, usize, usize)) {
+unsafe fn update_sync_footer(hwnd: HWND, state: usize, progress: (usize, usize, usize)) {
+    let status_hwnd = GetDlgItem(hwnd, IDC_SYNC_STATUS as i32);
+    let prog_hwnd = GetDlgItem(hwnd, IDC_SYNC_PROGRESS as i32);
+    let is_checking = state == crate::sync::ActivityState::Checking as usize;
+    let is_syncing = state == crate::sync::ActivityState::Syncing as usize;
+    let is_busy = is_checking || is_syncing;
+
+    if is_busy && progress.1 > 0 {
+        let done = progress.0.min(progress.1);
+        let pct = (done * 100) / progress.1;
+        let st = stmut(hwnd);
+        let text = if let Some(eta_idx) = st.sync_status_text.find("ETA ") {
+            let eta = st.sync_status_text[eta_idx..].trim();
+            format!("{done} / {} files \u{00B7} {pct}% \u{00B7} {eta}", progress.1)
+        } else {
+            format!("{done} / {} files \u{00B7} {pct}%", progress.1)
+        };
+        let _ = SetWindowTextW(status_hwnd, &hstring(&text));
+        SendMessageW(prog_hwnd, PBM_SETPOS, WPARAM(pct), LPARAM(0));
+    } else if is_busy {
+        let text = if is_checking {
+            "Checking..."
+        } else {
+            "Syncing..."
+        };
+        let _ = SetWindowTextW(status_hwnd, &hstring(text));
+        SendMessageW(prog_hwnd, PBM_SETPOS, WPARAM(0), LPARAM(0));
+    } else {
+        let _ = SetWindowTextW(status_hwnd, &hstring("Ready"));
+        SendMessageW(prog_hwnd, PBM_SETPOS, WPARAM(0), LPARAM(0));
+    }
+}
+
+unsafe fn update_status_strip_after_sync(hwnd: HWND, state: usize, progress: (usize, usize, usize)) {
     let st = stmut(hwnd);
     let is_checking = state == crate::sync::ActivityState::Checking as usize;
     let is_syncing = state == crate::sync::ActivityState::Syncing as usize;
@@ -69,80 +101,70 @@ unsafe fn update_ribbon_after_sync(hwnd: HWND, state: usize, progress: (usize, u
     let failed = progress.2;
 
     if is_checking {
-        let text = if is_paired(&st.config) {
-            "Paired \u{2022} Checking..."
-        } else {
-            "Checking..."
-        };
-        set_ribbon_status_text(hwnd, text);
+        set_status_strip_text(hwnd, "Checking...");
         set_status_dot_color(hwnd, C_AMBER);
     } else if is_syncing {
         let text = if progress.1 > 0 {
             let done = progress.0.min(progress.1);
-            let pct = (done * 100) / progress.1;
-            let remaining = progress.1.saturating_sub(progress.0);
-            if is_paired(&st.config) {
-                format!(
-                    "Paired \u{2022} Syncing \u{2022} {} files \u{2022} {}%",
-                    remaining, pct
-                )
+            let remaining = progress.1.saturating_sub(done);
+            if remaining == 1 {
+                "Syncing \u{00B7} 1 file remaining".to_string()
             } else {
-                format!("Syncing \u{2022} {} files \u{2022} {}%", remaining, pct)
+                format!("Syncing \u{00B7} {remaining} files remaining")
             }
-        } else if is_paired(&st.config) {
-            "Paired \u{2022} Syncing".to_string()
         } else {
             "Syncing".to_string()
         };
-        set_ribbon_status_text(hwnd, &text);
+        set_status_strip_text(hwnd, &text);
         set_status_dot_color(hwnd, C_AMBER);
     } else if is_idle && is_paired(&st.config) {
         if failed > 0 {
             let text = if failed == 1 {
-                "Paired \u{2022} 1 upload failed".to_string()
+                "1 upload failed".to_string()
             } else {
-                format!("Paired \u{2022} {} uploads failed", failed)
+                format!("{failed} uploads failed")
             };
-            set_ribbon_status_text(hwnd, &text);
+            set_status_strip_text(hwnd, &text);
             set_status_dot_color(hwnd, C_AMBER);
         } else if st.connected {
-            set_ribbon_status_text(hwnd, "Paired \u{2022} All synced");
+            set_status_strip_text(hwnd, "All synced \u{00B7} paired with server");
             set_status_dot_color(hwnd, C_GREEN);
         } else {
-            set_ribbon_status_text(hwnd, "Paired \u{2022} Offline");
+            set_status_strip_text(hwnd, "Offline");
             set_status_dot_color(hwnd, C_RED);
         }
     }
+    update_sync_footer(hwnd, state, progress);
 }
 
-unsafe fn update_ribbon_from_connection(hwnd: HWND) {
+unsafe fn update_status_strip_from_connection(hwnd: HWND) {
     let st = stmut(hwnd);
     if sync_is_busy(st) || st.auth_failure_notified {
         return;
     }
     if st.sync_last_failed > 0 {
         let text = if st.sync_last_failed == 1 {
-            "Paired \u{2022} 1 upload failed".to_string()
+            "1 upload failed".to_string()
         } else {
-            format!("Paired \u{2022} {} uploads failed", st.sync_last_failed)
+            format!("{} uploads failed", st.sync_last_failed)
         };
-        set_ribbon_status_text(hwnd, &text);
+        set_status_strip_text(hwnd, &text);
         set_status_dot_color(hwnd, C_AMBER);
         return;
     }
     if is_paired(&st.config) {
         if st.connected {
-            set_ribbon_status_text(hwnd, "Paired \u{2022} Online");
+            set_status_strip_text(hwnd, "All synced \u{00B7} paired with server");
             set_status_dot_color(hwnd, C_GREEN);
         } else {
-            set_ribbon_status_text(hwnd, "Paired \u{2022} Offline");
+            set_status_strip_text(hwnd, "Offline");
             set_status_dot_color(hwnd, C_RED);
         }
     } else if st.connected {
-        set_ribbon_status_text(hwnd, "Connected");
+        set_status_strip_text(hwnd, "Connected");
         set_status_dot_color(hwnd, C_GREEN);
     } else {
-        set_ribbon_status_text(hwnd, "Offline");
+        set_status_strip_text(hwnd, "Offline");
         set_status_dot_color(hwnd, C_RED);
     }
 }
@@ -183,7 +205,7 @@ fn approved_remote_folder(remote_folder: Option<&str>) -> std::result::Result<St
 unsafe fn apply_server_readonly(hwnd: HWND) {
     update_server_tooltip(hwnd);
     let label = if is_paired(&stmut(hwnd).config) {
-        "Approved folder"
+        "Server destination"
     } else {
         "Destination folder"
     };
@@ -393,51 +415,10 @@ unsafe fn notify_user(hwnd: HWND, message: &str) {
     .ok();
 }
 
-unsafe fn notify_user_status(hwnd: HWND, ribbon: &str, dot_color: u32, message: &str) {
-    set_ribbon_status_text(hwnd, ribbon);
+unsafe fn notify_user_status(hwnd: HWND, status: &str, dot_color: u32, message: &str) {
+    set_status_strip_text(hwnd, status);
     set_status_dot_color(hwnd, dot_color);
     notify_user(hwnd, message);
-}
-
-fn activity_entry(message: &str) -> Option<String> {
-    if let Some(rest) = message.strip_prefix("! ") {
-        return Some(rest.to_string());
-    }
-    if message.starts_with("Checking remote files") {
-        return Some(message.to_string());
-    }
-    if message.starts_with("Counting local files") {
-        return Some(message.to_string());
-    }
-    if message.starts_with("Comparing local to remote") {
-        return Some(message.to_string());
-    }
-    if message.starts_with("Checking remote changes") {
-        return Some(message.to_string());
-    }
-    if let Some(name) = message.strip_prefix("Uploading: ") {
-        return Some(format!("Uploading {}", display_activity_name(name)));
-    }
-    if let Some(name) = message.strip_prefix("Uploaded: ") {
-        return Some(format!("Uploaded {}", display_activity_name(name)));
-    }
-    if message.ends_with(" file(s) to upload") {
-        return Some(message.to_string());
-    }
-    if let Some(rest) = message.strip_prefix("Upload failed ") {
-        return Some(format!("Upload failed {}", display_activity_name(rest)));
-    }
-    if let Some(name) = message.strip_prefix("Downloaded: ") {
-        return Some(format!("Downloaded {}", display_activity_name(name)));
-    }
-    None
-}
-
-fn activity_replaces(message: &str) -> Option<String> {
-    if let Some(name) = message.strip_prefix("Uploaded: ") {
-        return Some(format!("Uploading {}", display_activity_name(name)));
-    }
-    None
 }
 
 fn display_activity_name(path: &str) -> &str {

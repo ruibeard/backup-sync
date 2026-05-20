@@ -1,32 +1,7 @@
 // ── App messages ──────────────────────────────────────────────────────────────
 unsafe fn on_app_log(hwnd: HWND, lp: LPARAM) -> LRESULT {
     let msg = Box::from_raw(lp.0 as *mut String);
-    let Some(entry) = activity_entry(&msg) else {
-        return LRESULT(0);
-    };
-    let hlb = GetDlgItem(hwnd, IDC_ACTIVITY_LIST as i32);
-    if let Some(previous) = activity_replaces(&msg) {
-        let previous = hstring(&previous);
-        let idx = SendMessageW(
-            hlb,
-            LB_FINDSTRINGEXACT,
-            WPARAM(usize::MAX),
-            LPARAM(previous.as_ptr() as isize),
-        );
-        if idx.0 >= 0 {
-            SendMessageW(hlb, LB_DELETESTRING, WPARAM(idx.0 as usize), LPARAM(0));
-        }
-    }
-    let ws = hstring(&entry);
-    SendMessageW(
-        hlb,
-        LB_INSERTSTRING,
-        WPARAM(0),
-        LPARAM(ws.as_ptr() as isize),
-    );
-    if SendMessageW(hlb, LB_GETCOUNT, WPARAM(0), LPARAM(0)).0 > 200 {
-        SendMessageW(hlb, LB_DELETESTRING, WPARAM(200), LPARAM(0));
-    }
+    apply_activity_log(hwnd, &msg);
     LRESULT(0)
 }
 
@@ -113,7 +88,7 @@ unsafe fn on_app_sync_activity(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if !is_syncing {
         st.sync_status_text = status_text.to_string();
     }
-    update_ribbon_after_sync(hwnd, wp.0, progress);
+    update_status_strip_after_sync(hwnd, wp.0, progress);
     LRESULT(0)
 }
 
@@ -150,7 +125,11 @@ unsafe fn on_timer(hwnd: HWND, wp: WPARAM) -> LRESULT {
         };
         tray::set_tray_icon_and_tip(hwnd, hicon, &tip);
     }
-    InvalidateRect(hwnd, Some(&st.server_status_rect), TRUE);
+    InvalidateRect(hwnd, Some(&st.status_strip_rect), TRUE);
+    let hlb = activity_list_hwnd(hwnd);
+    if !hlb.0.is_null() {
+        InvalidateRect(hlb, None, TRUE);
+    }
     LRESULT(0)
 }
 
@@ -161,11 +140,11 @@ unsafe fn on_app_connected(hwnd: HWND, wp: WPARAM) -> LRESULT {
     let conn_hwnd = GetDlgItem(hwnd, IDC_CONNECT as i32);
     if st.auth_failure_notified {
         set_status_dot_color(hwnd, C_RED);
-        set_ribbon_status_text(hwnd, "Pair again required");
+        set_status_strip_text(hwnd, "Pair again required");
         restore_pair_idle_controls(hwnd);
         return LRESULT(0);
     }
-    update_ribbon_from_connection(hwnd);
+    update_status_strip_from_connection(hwnd);
     if connected {
         ShowWindow(conn_hwnd, SW_HIDE);
     } else {
@@ -284,7 +263,7 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     );
     let _ = SetWindowTextW(
         GetDlgItem(hwnd, IDC_DEST_LABEL as i32),
-        &hstring("Approved folder"),
+        &hstring("Server destination"),
     );
     st.config.credential_profile_id = pair.credential_profile_id;
     st.config.credential_version = pair.credential_version;
@@ -303,7 +282,7 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
         Ok(()) => logs::append("Pairing complete; initial sync started."),
         Err(err) => {
             let msg = format!(
-                "Paired but sync did not start: {err}. Set origin folder and click Save."
+                "Paired but sync did not start: {err}. Set the backup folder on this PC."
             );
             notify_user_status(hwnd, "Sync not started", C_AMBER, &msg);
             apply_server_readonly(hwnd);
@@ -315,9 +294,9 @@ unsafe fn on_app_pair_result(hwnd: HWND, wp: WPARAM, lp: LPARAM) -> LRESULT {
     {
         let st = stmut(hwnd);
         st.sync_status_state = crate::sync::ActivityState::Checking as usize;
-        st.sync_status_text = "Paired \u{2022} Checking...".to_string();
+        st.sync_status_text = "Checking...".to_string();
     }
-    set_ribbon_status_text(hwnd, "Paired \u{2022} Checking...");
+    set_status_strip_text(hwnd, "Checking...");
     set_status_dot_color(hwnd, C_AMBER);
     apply_server_readonly(hwnd);
     start_connection_check(hwnd);

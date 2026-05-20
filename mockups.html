@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Backup Sync Tool — Layout Proposals</title>
+<title>Backup Sync Tool — Target UI</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -10,419 +10,142 @@
     background: #e8e8e8;
     padding: 30px;
     color: #333;
+    line-height: 1.5;
   }
-  h1 { text-align: center; margin-bottom: 8px; font-weight: 600; font-size: 22px; }
+  h1 { text-align: center; margin-bottom: 6px; font-weight: 600; font-size: 22px; }
+  .subtitle { text-align: center; font-size: 12px; color: #666; margin-bottom: 28px; }
 
-  .grid {
+  .states {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
-    gap: 30px;
-    max-width: 1400px;
-    margin: 0 auto;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+    max-width: 920px;
+    margin: 0 auto 36px;
   }
+  @media (max-width: 860px) { .states { grid-template-columns: 1fr; } }
 
-  .mockup {
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-    padding: 24px;
-  }
-  .mockup h2 {
-    font-size: 15px;
-    margin-bottom: 16px;
-    color: #444;
-    text-align: center;
-  }
   .state-label {
-    display: inline-block;
-    background: #eee;
-    padding: 2px 8px;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 600;
-    color: #555;
-    margin-bottom: 10px;
+    display: inline-block; background: #eee; padding: 2px 8px; border-radius: 3px;
+    font-size: 11px; font-weight: 600; color: #555; margin-bottom: 10px;
   }
 
   .window {
-    width: 400px;
-    background: #f0f0f0;
-    border: 1px solid #ccc;
-    border-radius: 6px;
-    margin: 0 auto 20px;
-    overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    width: 400px; background: #f0f0f0; border: 1px solid #ccc; border-radius: 6px;
+    margin: 0 auto; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   }
   .titlebar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    background: #e4e4e4;
-    border-bottom: 1px solid #ccc;
-    font-size: 13px;
-    font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #e4e4e4; border-bottom: 1px solid #ccc;
+    font-size: 13px; font-weight: 600;
   }
   .titlebar .btns { display: flex; gap: 6px; }
-  .tb-btn {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: #ccc; display: inline-block;
-  }
+  .tb-btn { width: 12px; height: 12px; border-radius: 50%; background: #ccc; display: inline-block; }
 
   .body { padding: 14px; font-size: 12px; }
   .section-title {
-    font-size: 11px;
-    font-weight: 700;
-    color: #888;
-    text-transform: uppercase;
+    font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase;
     letter-spacing: 0.4px;
-    margin-bottom: 6px;
   }
   .row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .row.between { justify-content: space-between; }
   .label { color: #555; font-size: 11px; margin-bottom: 3px; }
   input[type="text"] {
-    flex: 1;
-    border: 1px solid #ccc;
-    padding: 5px 8px;
-    font-size: 12px;
-    border-radius: 3px;
-    background: #fff;
-    font-family: inherit;
+    flex: 1; border: 1px solid #ccc; padding: 5px 8px; font-size: 12px;
+    border-radius: 3px; background: #fff; font-family: inherit; min-width: 0;
   }
   .btn {
-    border: 1px solid #bbb;
-    background: #e8e8e8;
-    padding: 5px 12px;
-    font-size: 11px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-family: inherit;
-    color: #333;
-    white-space: nowrap;
+    border: 1px solid #bbb; background: #e8e8e8; padding: 5px 12px; font-size: 11px;
+    border-radius: 4px; font-family: inherit; color: #333; white-space: nowrap;
   }
-  .dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    display: inline-block; flex-shrink: 0;
+  .link-btn {
+    background: none; border: none; color: #2B4FA3; text-decoration: underline;
+    font-size: 11px; cursor: pointer; padding: 0; font-family: inherit;
   }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
   .dot.green { background: #287A28; }
-  .dot.amber { background: #00A5FF; }
-  .dot.red   { background: #CC0000; }
-
-  .divider {
-    height: 1px;
-    background: #e0e0e0;
-    margin: 10px 0;
+  .path-value {
+    font-size: 12px; color: #333; padding: 6px 8px; background: #fff;
+    border: 1px solid #ddd; border-radius: 3px; margin-bottom: 10px; word-break: break-all;
+  }
+  .quiet-status {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #fff; border-left: 4px solid #287A28; margin-bottom: 12px; font-size: 12px;
+  }
+  .quiet-status.syncing { border-left-color: #00A5FF; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    width: 12px; height: 12px; border: 2px solid #ddd; border-top-color: #2B4FA3;
+    border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block;
   }
   .listbox {
-    border: 1px solid #ccc;
-    background: #fff;
-    min-height: 90px;
-    border-radius: 2px;
-    margin-bottom: 6px;
-    overflow: hidden;
+    border: 1px solid #ccc; background: #fff; min-height: 100px;
+    border-radius: 2px; margin-bottom: 10px; overflow: hidden;
   }
-  .listbox-item {
-    padding: 5px 8px;
-    font-size: 11px;
-    border-bottom: 1px solid #f0f0f0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .listbox-item:last-child { border-bottom: none; }
   .listbox-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 90px;
-    color: #999;
-    font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    height: 100px; color: #999; font-size: 11px;
   }
-  .footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 4px;
-    font-size: 11px;
+  .listbox-item-stacked { padding: 6px 8px; border-bottom: 1px solid #f0f0f0; }
+  .listbox-item-stacked:last-child { border-bottom: none; }
+  .listbox-item-top {
+    display: flex; align-items: center; gap: 6px; font-size: 11px; margin-bottom: 4px;
   }
-  .footer-left { display: flex; align-items: center; gap: 10px; color: #555; }
-  .link { color: #2B4FA3; text-decoration: underline; font-size: 11px; }
-  .gh-icon {
-    display: inline-block;
-    width: 12px; height: 12px;
-    vertical-align: middle;
-    margin-left: 4px;
+  .listbox-item-top .pct { margin-left: auto; color: #999; font-size: 10px; }
+  .listbox-item-top .done { margin-left: auto; color: #287A28; font-size: 10px; }
+  .mini-progress { height: 3px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
+  .mini-progress .bar { height: 100%; background: #00A5FF; border-radius: 2px; }
+  .sync-footer {
+    background: #fff; border: 1px solid #c5d9f5; border-radius: 4px;
+    padding: 8px 10px; margin-bottom: 10px;
   }
-
-  .check { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #444; }
+  .sync-footer.idle { border-color: #e0e0e0; background: #fafafa; }
+  .progress-wrap { width: 100%; height: 8px; background: #e0e0e0; border-radius: 2px; overflow: hidden; margin-top: 6px; }
+  .progress-wrap .bar { height: 100%; background: #2B4FA3; border-radius: 2px; }
+  .footer { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 11px; color: #444; }
+  .check { display: flex; align-items: center; gap: 4px; }
   .check-box {
-    width: 13px; height: 13px;
-    border: 1px solid #666;
-    border-radius: 2px;
-    display: inline-block;
-    position: relative;
+    width: 13px; height: 13px; border: 1px solid #666; border-radius: 2px;
+    display: inline-block; position: relative;
   }
   .check-box.checked::after {
     content: "✓"; position: absolute; top: -2px; left: 2px;
     font-size: 10px; color: #2B4FA3; font-weight: 700;
   }
+  .meta-footer {
+    display: flex; justify-content: space-between; margin-top: 8px;
+    font-size: 11px; color: #666;
+  }
+  .link { color: #2B4FA3; text-decoration: underline; }
 
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-  .spinner {
-    width: 12px; height: 12px;
-    border: 2px solid #ddd;
-    border-top-color: #2B4FA3;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    display: inline-block;
-    flex-shrink: 0;
-  }
-  .spinner-amber { border-top-color: #00A5FF; }
-  .spinner-green { border-top-color: #287A28; }
-
-  /* Layout 2 */
-  .l2-card {
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    padding: 10px 12px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .l2-card-left { display: flex; align-items: center; gap: 10px; }
-  .l2-card-title { font-weight: 700; font-size: 12px; color: #333; }
-  .l2-card-meta { font-size: 11px; color: #777; margin-top: 2px; }
-  .l2-card-sync {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: #555;
-    margin-top: 3px;
-  }
-
-  /* Layout 5 */
-  .l5-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-  .l5-pill {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 16px;
-    padding: 4px 4px 4px 12px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    font-size: 11px;
-    color: #333;
-  }
-  .l5-pill .btn {
-    border-radius: 12px;
-    padding: 4px 10px;
-    font-size: 11px;
-  }
-  .l5-pill-active {
-    border-color: #00A5FF;
-    background: #f8fbff;
-  }
-
-  /* Layout 6 */
-  .l6-ribbon {
-    margin: -14px -14px 12px -14px;
-    padding: 8px 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 12px;
-    color: #fff;
-  }
-  .l6-ribbon.green { background: #287A28; }
-  .l6-ribbon.amber { background: #d97706; }
-  .l6-ribbon.red   { background: #b91c1c; }
-  .l6-ribbon .btn {
-    background: rgba(255,255,255,0.2);
-    border-color: rgba(255,255,255,0.4);
-    color: #fff;
-  }
-  .l6-status { display: flex; align-items: center; gap: 6px; }
-  .l6-dot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: rgba(255,255,255,0.9);
-    display: inline-block;
-  }
-  .l6-sync-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: rgba(255,255,255,0.9);
-  }
-
-  .activity-icon { font-size: 11px; width: 14px; text-align: center; }
-  .progress-wrap {
-    width: 100%;
-    height: 4px;
-    background: #e0e0e0;
-    border-radius: 2px;
-    overflow: hidden;
-    margin-top: 4px;
-  }
-  .progress-bar {
-    height: 100%;
-    background: #2B4FA3;
-    border-radius: 2px;
-    transition: width 0.3s;
-  }
-  .progress-wrap.thick { height: 8px; margin-top: 6px; }
-  .progress-wrap.tall { height: 12px; border-radius: 4px; }
-  .progress-wrap.tall .progress-bar { border-radius: 4px; }
-
-  .intro {
-    max-width: 900px;
-    margin: 0 auto 28px;
-    padding: 14px 18px;
-    background: #fff;
-    border-radius: 8px;
-    font-size: 12px;
-    line-height: 1.55;
-    color: #555;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-  }
-  .intro strong { color: #333; }
-  .win32-tag {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 3px;
-    margin-left: 6px;
-    vertical-align: middle;
-  }
-  .win32-tag.easy { background: #e8f5e9; color: #287A28; }
-  .win32-tag.med  { background: #fff8e1; color: #b45309; }
-  .win32-tag.hard { background: #fce8e8; color: #b91c1c; }
-
-  /* Footer Status Bar */
-  .l-footer-sync {
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    padding: 8px 10px;
-    margin-bottom: 8px;
-  }
-  .l-footer-sync-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    color: #444;
-    margin-bottom: 6px;
-  }
-  .l-footer-sync-left { display: flex; align-items: center; gap: 8px; }
-  .l-footer-sync.idle { background: #f5f5f5; border-color: #e0e0e0; }
-  .l-footer-sync.idle .l-footer-sync-row { margin-bottom: 0; }
-
-  /* Inline Row Progress */
-  .l-inline-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #e0e0e0;
-  }
-  .l-inline-status { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
-  .listbox-item-stacked {
-    padding: 6px 8px;
-    border-bottom: 1px solid #f0f0f0;
-  }
-  .listbox-item-stacked:last-child { border-bottom: none; }
-  .listbox-item-top {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    margin-bottom: 4px;
-  }
-  .listbox-item-top .pct { margin-left: auto; color: #999; font-size: 10px; }
-  .listbox-item-top .done { margin-left: auto; color: #287A28; font-size: 10px; }
-  .mini-progress { height: 3px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
-  .mini-progress .progress-bar { background: #00A5FF; }
-
-  /* Now Syncing Panel */
-  .l-hero {
-    background: linear-gradient(135deg, #f0f6ff 0%, #fff 100%);
-    border: 1px solid #c5d9f5;
-    border-radius: 6px;
-    padding: 12px;
-    margin-bottom: 12px;
-  }
-  .l-hero.idle {
-    background: #f8f8f8;
-    border-color: #e0e0e0;
-    padding: 10px 12px;
-  }
-  .l-hero-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-  .l-hero-file {
+  /* Implementation plan */
+  .plan {
+    max-width: 920px; margin: 0 auto; background: #fff; border-radius: 8px;
+    padding: 24px 28px; box-shadow: 0 4px 20px rgba(0,0,0,0.08);
     font-size: 13px;
-    font-weight: 600;
-    color: #2B4FA3;
-    margin-bottom: 2px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
-  .l-hero-meta { font-size: 11px; color: #666; }
-  .l-hero-pct {
-    font-size: 18px;
-    font-weight: 700;
-    color: #2B4FA3;
-    flex-shrink: 0;
+  .plan h2 { font-size: 18px; margin-bottom: 4px; color: #222; }
+  .plan h3 { font-size: 14px; margin: 20px 0 8px; color: #333; }
+  .plan p, .plan li { color: #444; margin-bottom: 8px; }
+  .plan ul, .plan ol { margin: 0 0 12px 20px; }
+  .plan code { background: #f4f4f4; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  .plan table {
+    width: 100%; border-collapse: collapse; font-size: 12px; margin: 12px 0;
   }
-  .l-hero-stats {
-    display: flex;
-    gap: 12px;
-    font-size: 10px;
-    color: #888;
-    margin-top: 6px;
+  .plan th, .plan td {
+    border: 1px solid #ddd; padding: 8px 10px; text-align: left; vertical-align: top;
   }
+  .plan th { background: #f5f5f5; }
+  .phase { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px;
+    border-radius: 3px; background: #e8f0fe; color: #2B4FA3; margin-right: 6px; }
 </style>
 </head>
 <body>
 
-<h1>Backup Sync Tool — Layout Proposals</h1>
+<h1>Backup Sync Tool — Target UI</h1>
+<p class="subtitle">Practical Sync + inline row progress · system title bar · no Save button</p>
 
-<p class="intro">
-  <strong>Today (Win32):</strong> coloured ribbon + status dot + text only — e.g. <code>3/8 · 45%</code> in the ribbon label.
-  No visible progress bar yet (<code>mkprogress</code> / <code>IDC_SYNC_PROGRESS</code> exist but are unused).
-  <br><br>
-  <strong>Tags:</strong>
-  <span class="win32-tag easy">easy</span> = standard controls or existing ribbon paint;
-  <span class="win32-tag med">medium</span> = layout + one new control region;
-  <span class="win32-tag hard">hard</span> = owner-draw list or per-row custom paint.
-</p>
-
-<div class="grid">
-
-  <!-- ==================== CONNECTION CARD ==================== -->
-  <div class="mockup">
-    <h2>Connection Card <span class="win32-tag med">medium</span></h2>
-
+<div class="states">
+  <div>
     <span class="state-label">Idle</span>
     <div class="window">
       <div class="titlebar">
@@ -430,685 +153,196 @@
         <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
       </div>
       <div class="body">
-        <div class="l2-card">
-          <div class="l2-card-left">
-            <span class="dot green"></span>
-            <div>
-              <div class="l2-card-title">Paired · All synced</div>
-              <div class="l2-card-meta">Server: webdav.ruialmeida.me</div>
-            </div>
-          </div>
-          <button class="btn">Re-pair</button>
+        <div class="quiet-status">
+          <span class="dot green"></span>
+          <span><strong>All synced</strong> · paired with server</span>
         </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l2-card">
-          <div class="l2-card-left">
-            <span class="dot amber"></span>
-            <div>
-              <div class="l2-card-title">Paired · Syncing…</div>
-              <div class="l2-card-meta">Server: webdav.ruialmeida.me</div>
-              <div class="l2-card-sync"><span class="spinner spinner-amber"></span> 3 files left</div>
-            </div>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-item">
-            <span class="activity-icon">⬆</span>
-            <span>Uploading invoice_2024.pdf</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">67%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">⬇</span>
-            <span>Downloading backup_003.zip</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">12%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">✓</span>
-            <span>Uploaded settings.json</span>
-            <span style="margin-left:auto; color:#287A28; font-size:10px;">Done</span>
-          </div>
-        </div>
-        <div class="progress-wrap">
-          <div class="progress-bar" style="width: 45%"></div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ==================== STATUS PILL ==================== -->
-  <div class="mockup">
-    <h2>Status Pill <span class="win32-tag med">medium</span></h2>
-
-    <span class="state-label">Idle</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l5-header">
-          <span class="section-title">Server</span>
-          <div class="l5-pill">
-            <span class="dot green"></span>
-            <span>Paired · All synced</span>
-            <button class="btn">Re-pair</button>
-          </div>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l5-header">
-          <span class="section-title">Server</span>
-          <div class="l5-pill l5-pill-active">
-            <span class="spinner spinner-amber"></span>
-            <span>Syncing… 3 left</span>
-            <button class="btn">Re-pair</button>
-          </div>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-item">
-            <span class="activity-icon">⬆</span>
-            <span>Uploading invoice_2024.pdf</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">67%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">⬇</span>
-            <span>Downloading backup_003.zip</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">12%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">✓</span>
-            <span>Uploaded settings.json</span>
-            <span style="margin-left:auto; color:#287A28; font-size:10px;">Done</span>
-          </div>
-        </div>
-        <div class="progress-wrap">
-          <div class="progress-bar" style="width: 45%"></div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ==================== STATUS RIBBON ==================== -->
-  <div class="mockup">
-    <h2>Status Ribbon <span class="win32-tag easy">easy</span></h2>
-    <p style="text-align:center;font-size:11px;color:#888;margin:-8px 0 12px;">Closest to current app — add bar under activity</p>
-
-    <span class="state-label">Idle</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l6-ribbon green">
-          <div class="l6-status">
-            <span class="l6-dot"></span>
-            <span>Paired · All synced</span>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <span class="section-title">Server</span>
-          <span style="font-size:11px; color:#777;">webdav.ruialmeida.me</span>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l6-ribbon amber">
-          <div class="l6-status">
-            <span class="spinner" style="border-color:rgba(255,255,255,0.3); border-top-color:#fff;"></span>
-            <span>Syncing · 3 files left</span>
-          </div>
-          <div class="l6-sync-row">
-            <span>invoice_2024.pdf 67%</span>
-            <span>|</span>
-            <span>backup_003.zip 12%</span>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-          <span class="section-title">Server</span>
-          <span style="font-size:11px; color:#777;">webdav.ruialmeida.me</span>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-item">
-            <span class="activity-icon">⬆</span>
-            <span>Uploading invoice_2024.pdf</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">67%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">⬇</span>
-            <span>Downloading backup_003.zip</span>
-            <span style="margin-left:auto; color:#999; font-size:10px;">12%</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">✓</span>
-            <span>Uploaded settings.json</span>
-            <span style="margin-left:auto; color:#287A28; font-size:10px;">Done</span>
-          </div>
-        </div>
-        <div class="progress-wrap">
-          <div class="progress-bar" style="width: 45%"></div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ==================== FOOTER STATUS BAR ==================== -->
-  <div class="mockup">
-    <h2>Footer Status Bar <span class="win32-tag easy">easy</span></h2>
-    <p style="text-align:center;font-size:11px;color:#888;margin:-8px 0 12px;">Ribbon removed — sync lives above Save row</p>
-
-    <span class="state-label">Idle</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
         <div class="row between" style="margin-bottom:10px;">
-          <span class="section-title" style="margin:0;">Server</span>
-          <span style="font-size:11px;color:#777;">webdav.ruialmeida.me</span>
+          <span class="section-title">Server</span>
+          <span style="font-size:11px;color:#555;">u561272-sub1.your-storagebox.de</span>
+          <button class="link-btn">Pair again</button>
         </div>
-        <div class="label">Local backup folder</div>
+        <div class="label">Backup folder on this PC</div>
         <div class="row">
           <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
           <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="l-footer-sync idle">
-          <div class="l-footer-sync-row">
-            <div class="l-footer-sync-left">
-              <span class="dot green"></span>
-              <span><strong>Paired</strong> · All synced</span>
-            </div>
-            <button class="btn">Re-pair</button>
-          </div>
-        </div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="row between" style="margin-bottom:10px;">
-          <span class="section-title" style="margin:0;">Server</span>
-          <span style="font-size:11px;color:#777;">webdav.ruialmeida.me</span>
-        </div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
           <button class="btn">Browse</button>
-          <button class="btn">Open</button>
         </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-item">
-            <span class="activity-icon">⬆</span>
-            <span>Uploading invoice_2024.pdf</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">⬇</span>
-            <span>Downloading backup_003.zip</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">✓</span>
-            <span>Uploaded settings.json</span>
-            <span style="margin-left:auto; color:#287A28; font-size:10px;">Done</span>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="l-footer-sync">
-          <div class="l-footer-sync-row">
-            <div class="l-footer-sync-left">
-              <span class="spinner spinner-amber"></span>
-              <span><strong>Syncing</strong> · 3 of 8 files · 45%</span>
-            </div>
-            <button class="btn">Re-pair</button>
-          </div>
-          <div class="progress-wrap thick">
-            <div class="progress-bar" style="width: 45%"></div>
-          </div>
-        </div>
+        <div class="label">Server destination</div>
+        <div class="path-value">XDPT.59655-Palmeira-Minimercado</div>
+        <div class="section-title" style="margin-bottom:6px;">Recent activity</div>
+        <div class="listbox"><div class="listbox-empty">No recent activity</div></div>
+        <div class="sync-footer idle"><span style="font-size:11px;color:#888;">Ready</span></div>
         <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
+          <span class="check"><span class="check-box checked"></span> Start with Windows</span>
+          <span class="check"><span class="check-box checked"></span> Sync from server</span>
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
+        <div class="meta-footer">
+          <span><span class="link">v2026.0.3</span></span>
           <span class="link">Rui Almeida</span>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ==================== INLINE ROW PROGRESS ==================== -->
-  <div class="mockup">
-    <h2>Inline Row Progress <span class="win32-tag hard">hard</span></h2>
-    <p style="text-align:center;font-size:11px;color:#888;margin:-8px 0 12px;">No top % — progress per activity row</p>
-
-    <span class="state-label">Idle</span>
+  <div>
+    <span class="state-label">Syncing</span>
     <div class="window">
       <div class="titlebar">
         <span>Backup Sync Tool</span>
         <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
       </div>
       <div class="body">
-        <div class="l-inline-header">
-          <div class="l-inline-status">
-            <span class="dot green"></span>
-            <span>Paired · All synced</span>
-          </div>
-          <button class="btn">Re-pair</button>
+        <div class="quiet-status syncing">
+          <span class="spinner"></span>
+          <span><strong>Syncing</strong> · 3 files remaining</span>
         </div>
-        <div style="font-size:11px;color:#777;margin:-4px 0 10px;">webdav.ruialmeida.me</div>
-        <div class="label">Local backup folder</div>
+        <div class="row between" style="margin-bottom:10px;">
+          <span class="section-title">Server</span>
+          <span style="font-size:11px;color:#555;">u561272-sub1.your-storagebox.de</span>
+          <button class="link-btn">Pair again</button>
+        </div>
+        <div class="label">Backup folder on this PC</div>
         <div class="row">
           <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
           <button class="btn">Open</button>
+          <button class="btn">Browse</button>
         </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
+        <div class="label">Server destination</div>
+        <div class="path-value">XDPT.59655-Palmeira-Minimercado</div>
+        <div class="section-title" style="margin-bottom:6px;">Recent activity</div>
         <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="l-inline-header">
-          <div class="l-inline-status">
-            <span class="spinner spinner-amber"></span>
-            <span>Syncing · 3 files left</span>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div style="font-size:11px;color:#777;margin:-4px 0 10px;">webdav.ruialmeida.me</div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="divider"></div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox" style="min-height:110px;">
           <div class="listbox-item-stacked">
             <div class="listbox-item-top">
-              <span class="activity-icon">⬆</span>
-              <span>Uploading invoice_2024.pdf</span>
+              <span>⬆</span><span>Uploading invoice_2024.pdf</span>
               <span class="pct">67%</span>
             </div>
-            <div class="mini-progress"><div class="progress-bar" style="width:67%"></div></div>
+            <div class="mini-progress"><div class="bar" style="width:67%"></div></div>
           </div>
           <div class="listbox-item-stacked">
             <div class="listbox-item-top">
-              <span class="activity-icon">⬇</span>
-              <span>Downloading backup_003.zip</span>
+              <span>⬇</span><span>Downloading backup_003.zip</span>
               <span class="pct">12%</span>
             </div>
-            <div class="mini-progress"><div class="progress-bar" style="width:12%"></div></div>
+            <div class="mini-progress"><div class="bar" style="width:12%"></div></div>
           </div>
           <div class="listbox-item-stacked">
             <div class="listbox-item-top">
-              <span class="activity-icon">✓</span>
-              <span>Uploaded settings.json</span>
+              <span>✓</span><span>Uploaded settings.json</span>
               <span class="done">Done</span>
             </div>
           </div>
         </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
+        <div class="sync-footer">
+          <div class="row between" style="margin-bottom:0;">
+            <span style="font-size:11px;"><strong>3 / 8</strong> files · <strong>45%</strong></span>
+            <span style="font-size:10px;color:#888;">ETA ~2 min</span>
           </div>
-          <button class="btn">Save</button>
+          <div class="progress-wrap"><div class="bar" style="width:45%"></div></div>
         </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
+        <div class="footer">
+          <span class="check"><span class="check-box checked"></span> Start with Windows</span>
+          <span class="check"><span class="check-box checked"></span> Sync from server</span>
+        </div>
+        <div class="meta-footer">
+          <span><span class="link">v2026.0.3</span></span>
           <span class="link">Rui Almeida</span>
         </div>
       </div>
     </div>
   </div>
-
-  <!-- ==================== NOW SYNCING PANEL ==================== -->
-  <div class="mockup">
-    <h2>Now Syncing Panel <span class="win32-tag med">medium</span></h2>
-    <p style="text-align:center;font-size:11px;color:#888;margin:-8px 0 12px;">Hero block for current file + bar; list is history</p>
-
-    <span class="state-label">Idle</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="row between" style="margin-bottom:8px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="dot green"></span>
-            <span style="font-size:12px;font-weight:600;">Paired · All synced</span>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div style="font-size:11px;color:#777;margin-bottom:10px;">webdav.ruialmeida.me</div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="l-hero idle">
-          <span style="font-size:11px;color:#888;">Nothing syncing — last check OK</span>
-        </div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-empty">No recent activity</div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-
-    <span class="state-label">Active</span>
-    <div class="window">
-      <div class="titlebar">
-        <span>Backup Sync Tool</span>
-        <div class="btns"><span class="tb-btn"></span><span class="tb-btn"></span><span class="tb-btn"></span></div>
-      </div>
-      <div class="body">
-        <div class="row between" style="margin-bottom:8px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span class="spinner spinner-amber"></span>
-            <span style="font-size:12px;font-weight:600;">Syncing · 3 of 8 files</span>
-          </div>
-          <button class="btn">Re-pair</button>
-        </div>
-        <div style="font-size:11px;color:#777;margin-bottom:10px;">webdav.ruialmeida.me</div>
-        <div class="label">Local backup folder</div>
-        <div class="row">
-          <input type="text" value="C:\XDSoftware\backups" readonly>
-          <button class="btn">Browse</button>
-          <button class="btn">Open</button>
-        </div>
-        <div class="label">Approved folder</div>
-        <div style="font-size:12px; color:#333; margin-bottom:4px;">XDPT.59655-Palmeira-Minimercado</div>
-        <div class="l-hero">
-          <div class="l-hero-top">
-            <div style="min-width:0;flex:1;">
-              <div class="l-hero-file">⬆ invoice_2024.pdf</div>
-              <div class="l-hero-meta">Uploading · 3 files queued</div>
-            </div>
-            <span class="l-hero-pct">67%</span>
-          </div>
-          <div class="progress-wrap tall">
-            <div class="progress-bar" style="width: 67%"></div>
-          </div>
-          <div class="l-hero-stats">
-            <span>Overall 45%</span>
-            <span>ETA ~2 min</span>
-          </div>
-        </div>
-        <div class="section-title">Recent Activity</div>
-        <div class="listbox">
-          <div class="listbox-item">
-            <span class="activity-icon">⬇</span>
-            <span>Queued: backup_003.zip</span>
-          </div>
-          <div class="listbox-item">
-            <span class="activity-icon">✓</span>
-            <span>Uploaded settings.json</span>
-            <span style="margin-left:auto; color:#287A28; font-size:10px;">Done</span>
-          </div>
-        </div>
-        <div class="divider"></div>
-        <div class="footer">
-          <div class="footer-left">
-            <span class="check"><span class="check-box checked"></span> Start with Windows</span>
-            <span class="check"><span class="check-box checked"></span> Download</span>
-          </div>
-          <button class="btn">Save</button>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:#666;">
-          <span><span class="link">v2026.0.3</span><svg class="gh-icon" viewBox="0 0 24 24" fill="#333"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></span>
-          <span class="link">Rui Almeida</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
 </div>
+
+<section class="plan">
+  <h2>Implementation plan (engineer handoff)</h2>
+  <p>Visual spec: mockups above. Stack: raw Win32 (<code>windows-rs</code>), no UI framework. Keep system title bar.</p>
+
+  <h3><span class="phase">Phase 1</span> Layout &amp; chrome</h3>
+  <ol>
+    <li><strong>Remove tall colour ribbon</strong> — stop painting full-width green/amber <code>ribbon_rect</code> in <code>src/ui/paint.rs</code>. Replace with a quiet status strip: white background, 4px left accent (<code>#287A28</code> idle, <code>#00A5FF</code> syncing, red on error). Reuse <code>IDC_SERVER_STATUS</code> static or a new owner-draw child for text + spinner.</li>
+    <li><strong>Server row</strong> — keep <code>IDC_SERVER_HDR</code> + <code>IDC_SERVER_URL_LABEL</code>; add <strong>Pair again</strong> as owner-draw link (same pattern as <code>IDC_REPO</code> / <code>IDC_AUTHOR</code> in <code>draw.rs</code>), not a grey <code>BS_PUSHBUTTON</code>. Wire to existing <code>do_pair_device</code>. Hide while pairing (same as today’s Re-pair button).</li>
+    <li><strong>Rename labels</strong> in <code>create.rs</code> / <code>messages.rs</code>:
+      <ul>
+        <li>“Local backup folder” → “Backup folder on this PC”</li>
+        <li>“Approved folder” → “Server destination”</li>
+        <li>“Download from server” → “Sync from server”</li>
+      </ul>
+    </li>
+    <li><strong>Button order</strong> — swap layout: <code>Open</code> then <code>Browse</code> (<code>IDC_OPEN_LOCAL_FOLDER</code> before <code>IDC_BROWSE_LOCAL</code> in <code>layout_window</code>).</li>
+    <li><strong>Remove Save button</strong> — hide/remove <code>IDC_SAVE</code> from <code>create.rs</code> and <code>layout_window</code>. Reclaim width in bottom bar.</li>
+    <li><strong>Footer sync strip</strong> — place above checkboxes:
+      <ul>
+        <li>Idle: static “Ready” (or hide strip).</li>
+        <li>Busy: text <code>{done}/{total} · {pct}%</code> + optional ETA (logic already in <code>on_app_sync_activity</code>).</li>
+        <li>Wire <code>mkprogress</code> → <code>IDC_SYNC_PROGRESS</code> (<code>msctls_progress32</code>); update via <code>PBM_SETPOS</code> in <code>on_app_sync_activity</code> when <code>progress.1 &gt; 0</code>.</li>
+      </ul>
+    </li>
+    <li><strong>Window height</strong> — update <code>calc_window_height</code> / <code>layout_window</code> in <code>commands.rs</code>: subtract <code>RIBBON_H</code>, add status-strip + sync-footer heights; adjust <code>WndState</code> layout fields in <code>common.rs</code>.</li>
+  </ol>
+
+  <h3><span class="phase">Phase 2</span> Auto-save (replaces Save)</h3>
+  <p>Extract <code>do_save</code> body in <code>commands.rs</code> into <code>persist_settings(hwnd) -&gt; Result&lt;(), String&gt;</code> (read ctrls, validate, lock paired fields, encrypt, <code>config::save</code>, <code>apply_startup</code>, <code>restart_sync_engine</code>).</p>
+  <table>
+    <tr><th>Trigger</th><th>Action</th></tr>
+    <tr><td>Browse folder accepted</td><td><code>persist_settings</code> if path valid &amp; changed</td></tr>
+    <tr><td><code>IDC_START_WINDOWS</code> toggled</td><td><code>BN_CLICKED</code> → persist (compare bool first)</td></tr>
+    <tr><td><code>IDC_SYNC_REMOTE</code> toggled</td><td>same; restart engine when download pref changes</td></tr>
+    <tr><td>Pair success</td><td>unchanged — already saves in <code>on_app_pair_result</code></td></tr>
+  </table>
+  <p>On failure: <code>notify_user_status</code> ribbon/strip message — no <code>MessageBox</code>. On success after user edit: optional “Settings saved” in activity list (once).</p>
+  <p>Update README “When the engine starts” table: remove Save row; add Browse + checkbox triggers.</p>
+
+  <h3><span class="phase">Phase 3</span> Inline row progress (hard)</h3>
+  <p>Standard <code>LISTBOX</code> is single-line strings today (<code>WM_APP_LOG</code> → <code>LB_INSERTSTRING</code>). Mock shows <strong>two-line rows with mini bars</strong> — requires one of:</p>
+  <ul>
+    <li><strong>Option A (recommended):</strong> Replace activity list with owner-draw list (<code>LBS_OWNERDRAWFIXED</code>) or a child panel that paints rows in <code>WM_DRAWITEM</code> / <code>WM_PAINT</code>. Store <code>Vec&lt;ActivityRow&gt;</code> in <code>WndState</code> (icon, label, optional pct 0–100, done flag).</li>
+    <li><strong>Option B:</strong> Keep listbox for text; draw mini bars in parent client area under list — fragile on resize/scroll.</li>
+  </ul>
+  <p><strong>Data for per-row %:</strong> not emitted today. <code>sync.rs</code> logs <code>Uploading: path</code> but <code>ActivityInfo</code> only has batch <code>completed/total</code>. For real per-file bars:</p>
+  <ul>
+    <li>Extend upload path to report bytes sent / file size (or stepped 0/50/100).</li>
+    <li>Post per-file updates on <code>WM_APP_LOG</code> or new <code>WM_APP_FILE_PROGRESS</code>.</li>
+    <li>Until then: indeterminate mini bar (animated) on rows matching <code>activity_replaces</code> “Uploading …” — still improves UX vs text-only.</li>
+  </ul>
+
+  <h3><span class="phase">Phase 4</span> Status copy &amp; tray</h3>
+  <ul>
+    <li>Quiet strip text mirrors ribbon rules in <code>update_ribbon_after_sync</code> (<code>utils.rs</code>) — shorten for strip width (“All synced”, “Syncing · 3 left”).</li>
+    <li>Tray tooltip can keep detailed <code>{done}/{total} · ETA · {pct}%</code> from <code>on_app_sync_activity</code>.</li>
+    <li>Remove duplicate % from old ribbon-only placement once footer bar exists.</li>
+  </ul>
+
+  <h3>Files to touch (checklist)</h3>
+  <table>
+    <tr><th>File</th><th>Changes</th></tr>
+    <tr><td><code>src/ui/create.rs</code></td><td>Controls, labels, order, hide Save, add progress + link</td></tr>
+    <tr><td><code>src/ui/commands.rs</code></td><td><code>layout_window</code>, <code>persist_settings</code>, browse/checkbox handlers</td></tr>
+    <tr><td><code>src/ui/paint.rs</code></td><td>Remove ribbon fill; status strip accent if owner-draw</td></tr>
+    <tr><td><code>src/ui/draw.rs</code></td><td>Pair-again link colours; optional list row drawing</td></tr>
+    <tr><td><code>src/ui/messages.rs</code></td><td>Progress bar position; activity row model; pair label text</td></tr>
+    <tr><td><code>src/ui/utils.rs</code></td><td>Rename dest label helper; status strip updates</td></tr>
+    <tr><td><code>src/ui/common.rs</code></td><td>Layout constants, <code>WndState</code>, maybe <code>ActivityRow</code></td></tr>
+    <tr><td><code>src/ui/entry.rs</code></td><td><code>WM_DRAWITEM</code> for owner-draw list / link</td></tr>
+    <tr><td><code>src/sync.rs</code></td><td>(Phase 3) per-file progress callbacks</td></tr>
+    <tr><td><code>README.md</code></td><td>UI description, triggers, label names</td></tr>
+  </table>
+
+  <h3>Acceptance criteria</h3>
+  <ul>
+    <li>Paired window matches mockup structure (idle + syncing screenshots).</li>
+    <li>No Save button; folder + checkbox changes persist and restart sync without extra click.</li>
+    <li>Batch progress visible as footer bar + fraction/ETA text while syncing.</li>
+    <li>Activity rows show mini progress for in-flight uploads (determinate when data available, else indeterminate).</li>
+    <li>Pair again works from link; paired server/destination fields stay locked.</li>
+    <li><code>cargo build --release</code> clean; manual test: pair, browse, toggle sync-from-server, watch footer bar + list during upload.</li>
+  </ul>
+
+  <h3>Out of scope</h3>
+  <ul>
+    <li>Custom borderless title bar (keep system caption).</li>
+    <li>egui / webview / third-party UI.</li>
+  </ul>
+</section>
 
 </body>
 </html>

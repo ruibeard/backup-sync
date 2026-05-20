@@ -1,5 +1,5 @@
 // ── Background paint ──────────────────────────────────────────────────────────
-// Paints window bg, divider lines, and inline status dot + text.
+// Paints window bg, divider lines, quiet status strip, and inline status dot.
 unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
     let mut cr = RECT::default();
     GetClientRect(hwnd, &mut cr).ok();
@@ -14,40 +14,44 @@ unsafe fn paint_bg(hwnd: HWND, hdc: HDC) {
         return;
     }
 
-    let ribbon_color = if (*st).status_dot_color == C_GREEN {
-        C_GREEN
-    } else if (*st).status_dot_color == C_AMBER {
-        C_RIBBON_AMBER
-    } else {
-        C_RIBBON_RED
-    };
-    let rr = (*st).ribbon_rect;
-    if rr.right > rr.left && rr.bottom > rr.top {
-        let br_ribbon = CreateSolidBrush(COLORREF(ribbon_color));
-        FillRect(hdc, &rr, br_ribbon);
-        DeleteObject(br_ribbon);
+    let accent_color = (*st).status_dot_color;
+    let sr = (*st).status_strip_rect;
+    if sr.right > sr.left && sr.bottom > sr.top {
+        let br_strip = CreateSolidBrush(COLORREF(C_STATUS_BG));
+        FillRect(hdc, &sr, br_strip);
+        DeleteObject(br_strip);
+
+        let accent = RECT {
+            left: sr.left,
+            top: sr.top,
+            right: sr.left + STATUS_ACCENT_W,
+            bottom: sr.bottom,
+        };
+        let br_accent = CreateSolidBrush(COLORREF(accent_color));
+        FillRect(hdc, &accent, br_accent);
+        DeleteObject(br_accent);
     }
 
-    // Server status dot (white on ribbon; spinner spoke when busy)
-    let sr = (*st).server_status_rect;
-    if sr.right > sr.left && sr.bottom > sr.top {
-        let br_dot = CreateSolidBrush(COLORREF(0x00FFFFFF));
+    // Status dot (colored; spinner spoke when busy)
+    let dot_r = (*st).server_status_rect;
+    if dot_r.right > dot_r.left && dot_r.bottom > dot_r.top {
+        let br_dot = CreateSolidBrush(COLORREF(accent_color));
         let op_br = SelectObject(hdc, br_dot);
-        Ellipse(hdc, sr.left, sr.top, sr.right, sr.bottom);
+        Ellipse(hdc, dot_r.left, dot_r.top, dot_r.right, dot_r.bottom);
         SelectObject(hdc, op_br);
         DeleteObject(br_dot);
 
         let is_busy = (*st).sync_status_state == crate::sync::ActivityState::Checking as usize
             || (*st).sync_status_state == crate::sync::ActivityState::Syncing as usize;
         if is_busy {
-            let cx = (sr.left + sr.right) / 2;
-            let cy = (sr.top + sr.bottom) / 2;
-            let r = ((sr.right - sr.left) / 2) as f64;
+            let cx = (dot_r.left + dot_r.right) / 2;
+            let cy = (dot_r.top + dot_r.bottom) / 2;
+            let r = ((dot_r.right - dot_r.left) / 2) as f64;
             let frame = (*st).sync_anim_frame as f64;
-            let angle = frame * std::f64::consts::PI / 3.0; // 60° steps
+            let angle = frame * std::f64::consts::PI / 3.0;
             let x2 = cx + (r * angle.cos()) as i32;
             let y2 = cy - (r * angle.sin()) as i32;
-            let pen = CreatePen(PS_SOLID, 2, COLORREF(ribbon_color));
+            let pen = CreatePen(PS_SOLID, 2, COLORREF(0x00FFFFFF));
             let op_pen = SelectObject(hdc, pen);
             let _ = MoveToEx(hdc, cx, cy, None);
             let _ = LineTo(hdc, x2, y2);

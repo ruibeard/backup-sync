@@ -484,6 +484,7 @@ fn download_remote_paths(
 
         let local_path = local_path_for_relative(cfg, relative);
         let remote_url = remote_file_url(cfg, relative);
+        log(format!("Downloading: {}", relative));
         let remote_data = match webdav::get_file(cfg, password, &remote_url) {
             Ok(data) => data,
             Err(err) => {
@@ -566,8 +567,10 @@ fn upload_path(
     }
 
     log(format!("Uploading: {}", relative));
+    log(format!("Upload progress: {}|0", relative));
     match webdav::put_file(cfg, password, &remote_url, file, size) {
         Ok(_) => {
+            log(format!("Upload progress: {}|100", relative));
             let mtime = file_mtime_epoch(path);
             if let Err(err) = webdav::set_sar_last_modified(cfg, password, &remote_url, mtime) {
                 log(format!("Timestamp preserve failed {}: {}", relative, err));

@@ -47,13 +47,14 @@ unsafe fn on_create(hwnd: HWND) {
         server_tooltip_text: Vec::new(),
         status_dot_color: C_RED,
         server_status_rect: RECT::default(),
-        ribbon_rect: RECT::default(),
+        status_strip_rect: RECT::default(),
         hfont,
         hfont_hdr,
         hfont_b,
         hfont_small,
         hfont_link,
         br_win: CreateSolidBrush(COLORREF(C_WIN_BG)),
+        br_status_strip: CreateSolidBrush(COLORREF(C_STATUS_BG)),
         br_sect: CreateSolidBrush(COLORREF(C_WIN_BG)),
         br_input: CreateSolidBrush(COLORREF(C_INPUT_BG)),
         focused_edit: 0,
@@ -70,6 +71,8 @@ unsafe fn on_create(hwnd: HWND) {
         pair_cancel: None,
         pair_id: 0,
         auth_failure_notified: false,
+        activity_rows: Vec::new(),
+        activity_show_empty: true,
     });
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
 
@@ -179,34 +182,34 @@ unsafe fn build_ui(
     let st = &mut *state_ptr(hwnd);
     let mut y = 0;
 
-    // ── SERVER ────────────────────────────────────────────────────────────────
+    // ── STATUS STRIP + SERVER ───────────────────────────────────────────────────
     {
-        st.ribbon_rect = RECT {
+        st.status_strip_rect = RECT {
             left: 0,
             top: y,
             right: WIN_W,
-            bottom: y + RIBBON_H,
+            bottom: y + STATUS_STRIP_H,
         };
-        let pair_x = WIN_W - M - PAIR_BTN_W;
         let dot_size = 10i32;
-        let dot_x = M;
-        let dot_y = y + (RIBBON_H - dot_size) / 2;
+        let dot_x = M + STATUS_ACCENT_W + 6;
+        let dot_y = y + (STATUS_STRIP_H - dot_size) / 2;
+        let text_x = dot_x + dot_size + 8;
         mkstatic(
             hwnd,
             hi,
             IDC_SERVER_STATUS,
             if is_paired(cfg) {
                 if !cfg.watch_folder.is_empty() && !cfg.remote_folder.is_empty() {
-                    "Paired \u{2022} Checking..."
+                    "Checking..."
                 } else {
-                    "Paired \u{2022} Online"
+                    "All synced \u{00B7} paired with server"
                 }
             } else {
                 "Not paired"
             },
-            M + dot_size + 8,
-            y + (RIBBON_H - LBL_H) / 2,
-            pair_x - M - dot_size - 16,
+            text_x,
+            y + (STATUS_STRIP_H - LBL_H) / 2,
+            WIN_W - M - text_x,
             LBL_H,
             hf_b,
         );
@@ -216,21 +219,10 @@ unsafe fn build_ui(
             right: dot_x + dot_size,
             bottom: dot_y + dot_size,
         };
-        let pair_label = if is_paired(cfg) { "Re-pair" } else { "Pair" };
-        mkbtn_grey(
-            hwnd,
-            hi,
-            IDC_PAIR_DEVICE,
-            pair_label,
-            pair_x,
-            y + (RIBBON_H - SMALL_BTN_H) / 2,
-            PAIR_BTN_W,
-            SMALL_BTN_H,
-            hf_small,
-        );
         install_server_tooltip(hwnd, hi);
-        y += RIBBON_H + 12;
+        y += STATUS_STRIP_H + GAP;
 
+        let pair_x = WIN_W - M - PAIR_LINK_W;
         mkstatic(
             hwnd,
             hi,
@@ -249,25 +241,41 @@ unsafe fn build_ui(
             &server_display_text(cfg),
             M + 95,
             y,
-            INNER_W - 95,
+            pair_x - M - 95 - PAD,
             HDR_H,
             hf_small,
             SS_RIGHT,
+        );
+        let pair_label = if is_paired(cfg) {
+            "Pair again"
+        } else {
+            "Pair"
+        };
+        mklink(
+            hwnd,
+            hi,
+            IDC_PAIR_DEVICE,
+            pair_label,
+            pair_x,
+            y,
+            PAIR_LINK_W,
+            HDR_H,
+            hf_link,
         );
         y += HDR_H + 8;
     }
 
     // ── FOLDERS ───────────────────────────────────────────────────────────────
     {
-        let open_x = M + INNER_W - BROWSE_W;
-        let browse_x = open_x - PAD - BROWSE_W;
+        let browse_x = M + INNER_W - BROWSE_W;
+        let open_x = browse_x - PAD - BROWSE_W;
         let inp_w = INNER_W - FOLDER_ACTIONS_W - PAD;
 
         mkstatic(
             hwnd,
             hi,
             IDC_ORIGIN_LABEL,
-            "Local backup folder",
+            "Backup folder on this PC",
             M,
             y,
             INNER_W,
@@ -289,9 +297,9 @@ unsafe fn build_ui(
         mkbtn_grey(
             hwnd,
             hi,
-            IDC_BROWSE_LOCAL,
-            "Browse",
-            browse_x,
+            IDC_OPEN_LOCAL_FOLDER,
+            "Open",
+            open_x,
             y,
             BROWSE_W,
             INP_H,
@@ -300,9 +308,9 @@ unsafe fn build_ui(
         mkbtn_grey(
             hwnd,
             hi,
-            IDC_OPEN_LOCAL_FOLDER,
-            "Open",
-            open_x,
+            IDC_BROWSE_LOCAL,
+            "Browse",
+            browse_x,
             y,
             BROWSE_W,
             INP_H,
@@ -321,7 +329,7 @@ unsafe fn build_ui(
             hi,
             IDC_DEST_LABEL,
             if is_paired(cfg) {
-                "Approved folder"
+                "Server destination"
             } else {
                 "Destination folder"
             },
@@ -379,10 +387,33 @@ unsafe fn build_ui(
         st.activity_list_top = y;
         st.activity_list_h = lb_h;
         mklb(hwnd, hi, IDC_ACTIVITY_LIST, M, y, INNER_W, lb_h, hf_small);
+        refresh_activity_listbox(hwnd);
         y += lb_h;
         st.post_list_gap = PAD;
         y += PAD;
-        st.sync_row_h = 0;
+
+        st.sync_row_h = SYNC_FOOTER_H;
+        mkstatic(
+            hwnd,
+            hi,
+            IDC_SYNC_STATUS,
+            "Ready",
+            M,
+            y,
+            INNER_W,
+            LBL_H,
+            hf_small,
+        );
+        mkprogress(
+            hwnd,
+            hi,
+            IDC_SYNC_PROGRESS,
+            M,
+            y + LBL_H + 4,
+            INNER_W,
+            8,
+        );
+        y += SYNC_FOOTER_H;
         st.post_sync_sect = SECT;
         y += SECT;
 
@@ -395,14 +426,11 @@ unsafe fn build_ui(
     // Row 2: author credit
     {
         let row_h = BTN_H;
-        let button_y = y + (row_h - BTN_H) / 2;
         let check_y = y + (row_h - 18) / 2;
-        let save_w = 64i32;
-        let save_x = M + INNER_W - save_w;
         let startup_x = M;
         let startup_w = 126i32;
         let two_way_x = startup_x + startup_w + 12;
-        let two_way_w = save_x - two_way_x - 12;
+        let two_way_w = M + INNER_W - two_way_x;
 
         mkcheck(
             hwnd,
@@ -420,17 +448,13 @@ unsafe fn build_ui(
             hwnd,
             hi,
             IDC_SYNC_REMOTE,
-            "Download from server",
+            "Sync from server",
             two_way_x,
             check_y,
             two_way_w,
             18,
             hf_small,
             cfg.sync_remote_changes,
-        );
-
-        mkbtn_grey(
-            hwnd, hi, IDC_SAVE, "Save", save_x, button_y, save_w, BTN_H, hf_b,
         );
 
         y += row_h;
@@ -759,7 +783,9 @@ unsafe fn mklb(
         WS_CHILD
             | WS_VISIBLE
             | WS_VSCROLL
-            | WINDOW_STYLE(LBS_NOTIFY as u32 | LBS_NOINTEGRALHEIGHT as u32),
+            | WINDOW_STYLE(
+                LBS_NOTIFY as u32 | LBS_NOINTEGRALHEIGHT as u32 | LBS_OWNERDRAWVARIABLE as u32,
+            ),
         x,
         y,
         w,
@@ -818,7 +844,12 @@ unsafe fn install_server_tooltip(hwnd: HWND, hi: HINSTANCE) {
         .chain(std::iter::once(0))
         .collect();
 
-    for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_SERVER_URL_LABEL] {
+    for target_id in [
+        IDC_SERVER_HDR,
+        IDC_SERVER_STATUS,
+        IDC_SERVER_URL_LABEL,
+        IDC_PAIR_DEVICE,
+    ] {
         let target = GetDlgItem(hwnd, target_id as i32);
         if target.0.is_null() {
             continue;
@@ -900,7 +931,12 @@ unsafe fn update_server_tooltip(hwnd: HWND) {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    for target_id in [IDC_SERVER_HDR, IDC_SERVER_STATUS, IDC_SERVER_URL_LABEL] {
+    for target_id in [
+        IDC_SERVER_HDR,
+        IDC_SERVER_STATUS,
+        IDC_SERVER_URL_LABEL,
+        IDC_PAIR_DEVICE,
+    ] {
         let target = GetDlgItem(hwnd, target_id as i32);
         if target.0.is_null() {
             continue;

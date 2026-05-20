@@ -266,8 +266,6 @@ const C_GREY_BORDER: u32 = 0x00BBBBBB;
 const C_GREEN: u32 = 0x00287A28; // connected
 const C_AMBER: u32 = 0x0000A5FF; // waiting / pending approval
 const C_RED: u32 = 0x000000CC; // not connected
-const C_RIBBON_AMBER: u32 = 0x000677D9;
-const C_RIBBON_RED: u32 = 0x001C1CB9;
 const C_DIVIDER: u32 = 0x00E0E0E0; // section separator line
 
 // ── Control IDs ──────────────────────────────────────────────────────────────
@@ -280,7 +278,6 @@ const IDC_PASSWORD: u16 = 105;
 const IDC_REMOTE_FOLDER: u16 = 106;
 const IDC_CONNECT: u16 = 108;
 const IDC_SERVER_STATUS: u16 = 123;
-const IDC_SAVE: u16 = 110;
 const IDC_SYNC_STATUS: u16 = 117;
 const IDC_ACTIVITY_LIST: u16 = 114;
 const IDC_START_WINDOWS: u16 = 115;
@@ -338,11 +335,37 @@ const HDR_H: i32 = 20; // section heading height
 const LBL_H: i32 = 18; // label text height
 const BROWSE_W: i32 = 64; // text button width
 const FOLDER_ACTIONS_W: i32 = BROWSE_W * 2 + PAD;
-const PAIR_BTN_W: i32 = 82;
-const RIBBON_H: i32 = 40;
+const PAIR_LINK_W: i32 = 72;
+const STATUS_STRIP_H: i32 = 36;
+const STATUS_ACCENT_W: i32 = 4;
+const SYNC_FOOTER_H: i32 = 40;
+const C_STATUS_BG: u32 = 0x00FFFFFF;
 
 const MIN_ACTIVITY_LIST_H: i32 = 96;
 const INNER_W: i32 = WIN_W - M * 2; // usable inner width
+const MAX_ACTIVITY_ROWS: usize = 200;
+const ACTIVITY_ROW_H_DONE: i32 = 22;
+const ACTIVITY_ROW_H_ACTIVE: i32 = 34;
+const C_PROGRESS_MINI: u32 = 0x00FFA500; // #00A5FF BGR
+const C_PROGRESS_TRACK: u32 = 0x00E8E8E8;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ActivityKind {
+    Info,
+    Uploading,
+    Downloading,
+    Done,
+    Error,
+}
+
+#[derive(Clone)]
+struct ActivityRow {
+    label: String,
+    kind: ActivityKind,
+    pct: Option<u8>,
+    /// Match key for replacing in-flight rows (e.g. "upload:invoice.pdf").
+    replace_key: Option<String>,
+}
 
 // ── Window state ──────────────────────────────────────────────────────────────
 struct WndState {
@@ -366,13 +389,14 @@ struct WndState {
     server_tooltip_text: Vec<u16>,
     status_dot_color: u32,
     server_status_rect: RECT,
-    ribbon_rect: RECT,
+    status_strip_rect: RECT,
     hfont: HFONT,
     hfont_hdr: HFONT,
     hfont_b: HFONT,
     hfont_small: HFONT,
     hfont_link: HFONT,
     br_win: HBRUSH,
+    br_status_strip: HBRUSH,
     br_sect: HBRUSH,
     br_input: HBRUSH,
     focused_edit: u16,
@@ -398,6 +422,8 @@ struct WndState {
     pair_cancel: Option<Arc<AtomicBool>>,
     pair_id: u64,
     auth_failure_notified: bool,
+    activity_rows: Vec<ActivityRow>,
+    activity_show_empty: bool,
 }
 
 struct PairResult {

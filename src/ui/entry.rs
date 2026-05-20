@@ -94,12 +94,12 @@ unsafe extern "system" fn wnd_proc(
                 return LRESULT(GetStockObject(WHITE_BRUSH).0 as isize);
             }
             if id == IDC_SERVER_STATUS {
-                SetTextColor(hdc, COLORREF(0x00FFFFFF));
-                return LRESULT(GetStockObject(NULL_BRUSH).0 as isize);
+                SetTextColor(hdc, COLORREF(C_LABEL));
+                return LRESULT((*st).br_status_strip.0 as isize);
             }
             let text_clr = match id {
                 IDC_DEST_CREATED => C_GREEN,
-                IDC_REPO => C_BLUE,
+                IDC_REPO | IDC_PAIR_DEVICE => C_BLUE,
                 IDC_AUTHOR => C_LABEL,
                 IDC_SERVER_HDR | IDC_ACTIVITY_HDR => 0x00888888,
                 IDC_SERVER_URL_LABEL => 0x00777777,
@@ -131,6 +131,7 @@ unsafe extern "system" fn wnd_proc(
         }
 
         WM_COMMAND => on_command(hwnd, wparam),
+        WM_MEASUREITEM => on_measure_item(hwnd, lparam),
         WM_DRAWITEM => on_draw_item(lparam),
 
         WM_GETMINMAXINFO => {
@@ -190,6 +191,7 @@ unsafe extern "system" fn wnd_proc(
             if !st.is_null() {
                 tray::remove_tray_icon(hwnd);
                 DeleteObject((*st).br_win);
+                DeleteObject((*st).br_status_strip);
                 DeleteObject((*st).br_sect);
                 DeleteObject((*st).br_input);
                 DeleteObject((*st).hfont);

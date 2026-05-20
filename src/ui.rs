@@ -6,6 +6,7 @@ include!("ui/entry.rs");
 include!("ui/paint.rs");
 include!("ui/create.rs");
 include!("ui/draw.rs");
+include!("ui/activity.rs");
 include!("ui/commands.rs");
 include!("ui/messages.rs");
 include!("ui/utils.rs");

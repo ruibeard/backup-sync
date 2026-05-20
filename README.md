@@ -30,7 +30,7 @@ Non-negotiables:
 - **First-run baseline:** with no local manifest and **Download from server** off, startup uploads every file in the origin folder.
 - Streams uploads from disk.
 - Bounded parallel uploads with `parallel_uploads`.
-- Sync engine starts on app launch (when configured), **immediately after pairing**, and on Save.
+- Sync engine starts on app launch (when configured), **immediately after pairing**, and when settings change (browse folder, checkboxes).
 - Optional remote-to-local sync polling.
 - Local and remote manifest tracking with `.backupsynctool-manifest.json` (local = last successful upload; remote = server snapshot from `PROPFIND`).
 - Pairing flow with server-approved customer folder.
@@ -38,9 +38,22 @@ Non-negotiables:
 - WebDAV auth failure pauses sync and asks the user/admin to pair again.
 - DPAPI protection for device token and WebDAV password.
 - Start with Windows support.
-- Compact Recent Activity feed.
-- Sync progress in the main window and tray tooltip.
+- Recent Activity feed with inline per-file progress rows.
+- Quiet status strip, footer batch progress bar, and detailed tray tooltip while syncing.
 - Silent GitHub release check on startup.
+
+## Main window UI
+
+Target layout reference: **`mockups.html`**.
+
+Paired window highlights:
+
+- Quiet status strip (left accent + short text) instead of the old full-width ribbon.
+- **Pair again** link on the server row; **Open** then **Browse** on the backup folder row.
+- Labels: “Backup folder on this PC”, “Server destination”, “Sync from server”.
+- **No Save button** — settings auto-save on browse + checkbox changes (`persist_settings` in `src/ui/commands.rs`).
+- Footer batch progress: `msctls_progress32` + `done/total · pct%` (+ ETA when syncing).
+- Recent activity: owner-draw list with inline mini bars (indeterminate while uploading; stepped 0–100% from sync logs).
 
 ## Project Layout
 
@@ -48,6 +61,7 @@ Non-negotiables:
 | --- | --- |
 | `src/main.rs` | Entry point, module wiring, window/message loop startup |
 | `src/ui.rs` | Main Win32 UI, pairing UX, config locking, event handlers |
+| `src/ui/activity.rs` | Owner-draw Recent Activity list and row model |
 | `src/config.rs` | Load/save `backupsynctool.json` next to the exe |
 | `src/secret.rs` | DPAPI encrypt/decrypt helpers |
 | `src/webdav.rs` | Blocking WebDAV HTTP client |
@@ -244,7 +258,7 @@ Once paired:
 - The sync engine starts immediately via `restart_sync_engine()` in `src/ui/utils.rs` (no Save click required).
 - Server URL, username, password, and destination folder become read-only.
 - Destination browse is hidden/disabled.
-- `Save` preserves the stored approved folder even if UI text changes.
+- `persist_settings` preserves the stored approved folder even if UI text changes.
 - Background XD detection cannot overwrite the approved folder.
 - Remote picker navigation cannot change the approved folder.
 
@@ -262,7 +276,8 @@ It is called from:
 | --- | --- |
 | App launch (config already complete) | `src/ui/create.rs` `on_create` |
 | Successful pairing | `src/ui/messages.rs` `on_app_pair_result` |
-| Save | `src/ui/commands.rs` `do_save` |
+| Browse folder accepted | `src/ui/commands.rs` `browse_local` → `persist_settings` |
+| **Start with Windows** or **Sync from server** toggled | `src/ui/commands.rs` `persist_settings_on_toggle` |
 
 If the origin folder is empty at pair/save time, `ensure_default_watch_folder()` uses `xd::default_watch_folder()` (`C:\XDSoftware\backups` when that directory exists).
 
@@ -349,7 +364,7 @@ Implemented behavior:
 - While pairing is pending, the server status shows an amber dot, `Waiting for approval`, and the Pair button changes to `Waiting...`.
 - The pairing QR window starts in a preparing state, then shows the approval code, expiry text, waiting-for-admin message, QR code, approval link, and a Cancel button.
 - Pairing approval saves the returned device token, WebDAV credentials, and approved folder automatically, then **starts the sync engine immediately** (no extra Save click required). If the origin folder is empty, XD’s default backup path is used when available.
-- Save is for changing local settings later (origin folder, startup preference, remote-download preference) and restarts sync; it is hidden while pairing is pending.
+- Local settings (origin folder, startup preference, sync-from-server preference) auto-save on change and restart sync when applicable.
 - Routine status and errors use the ribbon + Recent Activity (`notify_user`) and do **not** block the UI with message boxes. The only modal dialog is **Update Available** (Yes/No before downloading).
 - UPDATE button is hidden until a newer GitHub release is found.
 - Server credentials are not editable in the UI; `backupsynctool.json` is the source for stored WebDAV settings.
@@ -453,12 +468,12 @@ Before changing pairing, sync, config, or credential handling:
 - **After successful pairing, call `restart_sync_engine()`** — saving config alone is not enough.
 - Use `is_sync_configured()` before starting sync (origin folder, URL, user, password, destination).
 - Do not trust editable UI fields for server-owned values.
-- Do not allow `Save` to overwrite paired `remote_folder`.
+- Do not allow settings save to overwrite paired `remote_folder`.
 - Do not reintroduce credential refresh unless the protocol changes again.
 - Only treat WebDAV **401** as auth failure; do not map 403 to `AuthFailed`.
 - Local manifest: update per file only on successful PUT; do not overwrite with a full local scan on failed startup.
 - Remote manifest: build from `PROPFIND`, not `scan_local_state`.
-- First run (no local manifest, download off): upload all local files — do not require Save after pair.
+- First run (no local manifest, download off): upload all local files — do not require a manual save after pair.
 - Keep DPAPI encryption for token/password.
 - Keep sync URLs rooted at stored `webdav_url` + stored `remote_folder`.
 - Rebuild release, copy exe to root, relaunch from root after code changes.

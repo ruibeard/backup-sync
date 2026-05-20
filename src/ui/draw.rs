@@ -7,6 +7,10 @@ unsafe fn on_draw_item(lp: LPARAM) -> LRESULT {
     let di = &*(lp.0 as *const DRAWITEMSTRUCT);
     let id = di.CtlID as u16;
 
+    if id == IDC_ACTIVITY_LIST {
+        return on_draw_activity_item(lp);
+    }
+
     let is_blue = BLUE_IDS.contains(&id);
     let is_borderless = BORDERLESS_IDS.contains(&id);
     let pressed = (di.itemState.0 & ODS_SELECTED.0) != 0;
