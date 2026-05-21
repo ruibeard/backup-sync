@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "python .cursor/hooks/summarize.py",
+        "loop_limit": 1
+      }
+    ]
+  }
+}
